@@ -12,23 +12,15 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import {
+  formatAud,
+  getDashboardData,
+  type AllocationItem,
+} from "@/lib/server/finance-store";
+import { AddFinanceItemModal } from "@/components/add-finance-item-modal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-
-const assetItems = [
-  { label: "MyFinances", value: "AUD 41,359", tone: "blue", width: "100%" },
-  { label: "MyProperties", value: "AUD 0", tone: "light-blue", width: "0%" },
-  { label: "MyCollectables", value: "AUD 0", tone: "pale-blue", width: "0%" },
-  { label: "MyBelongings", value: "AUD 0", tone: "sky", width: "0%" },
-] as const;
-
-const liabilityItems = [
-  { label: "MyFinances", value: "AUD (1,164)", tone: "red", width: "68%" },
-  { label: "MyBelongings", value: "AUD (593)", tone: "pink", width: "35%" },
-  { label: "MyProperties", value: "AUD (516)", tone: "orange", width: "31%" },
-  { label: "MyCollectables", value: "AUD (54)", tone: "yellow", width: "8%" },
-] as const;
 
 const sideMenu = [
   { label: "Create", icon: Plus },
@@ -41,7 +33,15 @@ const sideMenu = [
   { label: "Close", icon: X },
 ] as const;
 
+export const dynamic = "force-dynamic";
+
 export default function Home() {
+  const dashboard = getDashboardData();
+  const assetTotal = Math.round(dashboard.totals.assets).toLocaleString("en-AU");
+  const liabilityTotal = `(${Math.round(dashboard.totals.liabilities).toLocaleString(
+    "en-AU"
+  )})`;
+
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="grid min-h-screen grid-cols-[64px_1fr] max-[980px]:grid-cols-1">
@@ -87,10 +87,7 @@ export default function Home() {
               >
                 <Bell className="size-4 text-slate-700" />
               </Button>
-              <Button className="h-9 bg-cyan-600 hover:bg-cyan-700">
-                <Plus className="size-4" />
-                Add
-              </Button>
+              <AddFinanceItemModal />
             </div>
           </header>
 
@@ -123,30 +120,55 @@ export default function Home() {
               <Globe className="mr-2 size-4 text-slate-500" />
               Global Dashboard
             </div>
-            <SummaryCell label="My Net Worth" value="AUD 41,359" />
-            <SummaryCell label="My Assets" value="AUD 41,359" />
-            <SummaryCell label="My Liabilities" value="AUD 0" isDanger />
+            <SummaryCell
+              label="My Net Worth"
+              value={formatAud(dashboard.totals.netWorth)}
+            />
+            <SummaryCell
+              label="My Assets"
+              value={formatAud(dashboard.totals.assets)}
+            />
+            <SummaryCell
+              label="My Liabilities"
+              value={formatAud(dashboard.totals.liabilities, {
+                negativeStyle: true,
+              })}
+              isDanger
+            />
           </section>
 
           <section className="grid gap-3 lg:grid-cols-2">
             <AllocationCard
               title="Assets Allocation"
-              total="41,359"
+              total={assetTotal}
               donutClassName="donut-asset"
-              items={assetItems}
+              items={dashboard.assets}
             />
             <AllocationCard
               title="Liabilities Allocation"
-              total="(2,327)"
+              total={liabilityTotal}
               donutClassName="donut-liability"
-              items={liabilityItems}
+              items={dashboard.liabilities}
+              negativeValues
             />
           </section>
 
           <section className="mt-3 grid gap-3 md:grid-cols-3">
-            <MiniCard label="Net Value" value="AUD 41,359" />
-            <MiniCard label="Assets" value="AUD 41,359" />
-            <MiniCard label="Liabilities" value="AUD 0" isDanger />
+            <MiniCard
+              label="Net Value"
+              value={formatAud(dashboard.totals.netWorth)}
+            />
+            <MiniCard
+              label="Assets"
+              value={formatAud(dashboard.totals.assets)}
+            />
+            <MiniCard
+              label="Liabilities"
+              value={formatAud(dashboard.totals.liabilities, {
+                negativeStyle: true,
+              })}
+              isDanger
+            />
           </section>
         </main>
       </div>
@@ -178,16 +200,13 @@ function AllocationCard({
   total,
   donutClassName,
   items,
+  negativeValues = false,
 }: {
   title: string;
   total: string;
   donutClassName: string;
-  items: readonly {
-    label: string;
-    value: string;
-    tone: string;
-    width: string;
-  }[];
+  items: readonly AllocationItem[];
+  negativeValues?: boolean;
 }) {
   return (
     <Card className="rounded-xl border-slate-200 shadow-none">
@@ -209,7 +228,9 @@ function AllocationCard({
               <div className="mb-1 grid grid-cols-[auto_1fr_auto] items-center gap-2 text-sm">
                 <span className={`dot ${item.tone}`} />
                 <span>{item.label}</span>
-                <span className="text-slate-500">{item.value}</span>
+                <span className="text-slate-500">
+                  {formatAud(item.amount, { negativeStyle: negativeValues })}
+                </span>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
                 <span
