@@ -16,6 +16,7 @@ const ChatRequestSchema = z.object({
   message: z.string().min(1),
   timezone: z.string().optional(),
   locale: z.string().optional(),
+  availableRoutes: z.array(z.string()).optional(),
 });
 
 const app = express();
@@ -55,6 +56,7 @@ app.post('/api/agent/chat', async (req, res) => {
       history: prev,
       timezone: body.timezone,
       locale: body.locale,
+      availableRoutes: body.availableRoutes,
     });
 
     const result = await runAgent(agentInput);

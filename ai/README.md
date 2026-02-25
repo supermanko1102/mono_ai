@@ -61,8 +61,18 @@ curl -sS -X POST http://localhost:3000/api/agent/chat \
   -H 'Content-Type: application/json' \
   -d '{
     "sessionId": "demo-1",
-    "message": "幫我算 (25+17)*3，然後告訴我現在台北時間"
+    "message": "帶我去 docs",
+    "availableRoutes": ["/", "/pricing", "/docs", "/support"]
   }'
+```
+
+若 agent 判斷要導頁，會回傳：
+
+```json
+{
+  "answer": "我幫你打開文件頁面。",
+  "navigateTo": "/docs"
+}
 ```
 
 ### Flow API (`expressHandler` 需要 `data` 包裝)
