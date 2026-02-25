@@ -44,41 +44,49 @@ npm run dev
 npm start
 ```
 
-預設 port: `3000`
+預設 port: `3010`
 
 ## 3) 測試 API
 
 ### Health
 
 ```bash
-curl -sS http://localhost:3000/health
+curl -sS http://localhost:3010/health
 ```
 
 ### Chat API
 
 ```bash
-curl -sS -X POST http://localhost:3000/api/agent/chat \
+curl -sS -X POST http://localhost:3010/api/agent/chat \
   -H 'Content-Type: application/json' \
   -d '{
     "sessionId": "demo-1",
     "message": "帶我去 docs",
-    "availableRoutes": ["/", "/pricing", "/docs", "/support"]
+    "availableRoutes": ["/", "/pricing", "/docs", "/support"],
+    "availableModals": ["pricing-comparison", "docs-quickstart", "support-contact"]
   }'
 ```
 
-若 agent 判斷要導頁，會回傳：
+若 agent 判斷要執行前端動作，會回傳：
 
 ```json
 {
   "answer": "我幫你打開文件頁面。",
-  "navigateTo": "/docs"
+  "actions": [
+    { "type": "navigate", "to": "/docs" },
+    { "type": "open_modal", "id": "docs-quickstart" }
+  ],
+  "navigateTo": "/docs",
+  "openModalId": "docs-quickstart"
 }
 ```
+
+`navigateTo` / `openModalId` 為相容欄位，建議前端優先使用 `actions`。
 
 ### Flow API (`expressHandler` 需要 `data` 包裝)
 
 ```bash
-curl -sS -X POST http://localhost:3000/api/agent/flow \
+curl -sS -X POST http://localhost:3010/api/agent/flow \
   -H 'Content-Type: application/json' \
   -d '{
     "data": {

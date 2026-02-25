@@ -17,12 +17,13 @@ const ChatRequestSchema = z.object({
   timezone: z.string().optional(),
   locale: z.string().optional(),
   availableRoutes: z.array(z.string()).optional(),
+  availableModals: z.array(z.string()).optional(),
 });
 
 const app = express();
 app.use(express.json());
 
-const PORT = Number(process.env.PORT ?? 3000);
+const PORT = Number(process.env.PORT ?? 3010);
 
 const sessions = new Map<
   string,
@@ -57,6 +58,7 @@ app.post('/api/agent/chat', async (req, res) => {
       timezone: body.timezone,
       locale: body.locale,
       availableRoutes: body.availableRoutes,
+      availableModals: body.availableModals,
     });
 
     const result = await runAgent(agentInput);
