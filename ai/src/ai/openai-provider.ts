@@ -9,6 +9,7 @@ import {
 } from './agent-schema.js';
 import {
   calculateImpl,
+  createFinanceItemImpl,
   getDateTimeImpl,
   lookupFaqImpl,
 } from './tool-impl.js';
@@ -41,6 +42,26 @@ const openAITools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           expression: { type: 'string' },
         },
         required: ['expression'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'createFinanceItem',
+      description:
+        'Create a finance item in the website data store. Use when user asks to add asset/liability data.',
+      parameters: {
+        type: 'object',
+        properties: {
+          kind: {
+            type: 'string',
+            enum: ['asset', 'liability'],
+          },
+          category: { type: 'string' },
+          amount: { type: 'number' },
+        },
+        required: ['kind', 'category', 'amount'],
       },
     },
   },
@@ -94,6 +115,15 @@ async function executeOpenAITool(
       case 'calculate':
         return calculateImpl({
           expression: typeof args.expression === 'string' ? args.expression : '',
+        });
+      case 'createFinanceItem':
+        return createFinanceItemImpl({
+          kind: typeof args.kind === 'string' ? args.kind : '',
+          category: typeof args.category === 'string' ? args.category : '',
+          amount:
+            typeof args.amount === 'number'
+              ? args.amount
+              : Number.parseFloat(String(args.amount ?? '')),
         });
       case 'lookupFaq':
         return lookupFaqImpl({

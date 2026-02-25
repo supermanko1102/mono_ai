@@ -11,6 +11,7 @@ import {
 } from './agent-schema.js';
 import {
   calculateImpl,
+  createFinanceItemImpl,
   getDateTimeImpl,
   lookupFaqImpl,
 } from './tool-impl.js';
@@ -75,6 +76,31 @@ const lookupFaq = ai.defineTool(
   async ({ topic }) => lookupFaqImpl({ topic })
 );
 
+const createFinanceItem = ai.defineTool(
+  {
+    name: 'createFinanceItem',
+    description:
+      'Create a finance item in the website data store. Use when user asks to add asset/liability data.',
+    inputSchema: z.object({
+      kind: z.enum(['asset', 'liability']),
+      category: z.string(),
+      amount: z.number(),
+    }),
+    outputSchema: z.object({
+      item: z.object({
+        id: z.number(),
+        kind: z.enum(['asset', 'liability']),
+        category: z.string(),
+        amount: z.number(),
+        createdAt: z.string(),
+      }),
+      baseUrl: z.string(),
+    }),
+  },
+  async ({ kind, category, amount }) =>
+    createFinanceItemImpl({ kind, category, amount })
+);
+
 export async function runGeminiAgent(input: AgentInput): Promise<AgentOutput> {
   ensureGeminiApiKey();
   const systemPrompt = createSystemPrompt(
@@ -89,7 +115,7 @@ export async function runGeminiAgent(input: AgentInput): Promise<AgentOutput> {
       content: [{ text: message.content }],
     })),
     prompt: input.message,
-    tools: [getDateTime, calculate, lookupFaq],
+    tools: [getDateTime, calculate, createFinanceItem, lookupFaq],
     maxTurns: 5,
     output: {
       schema: AgentOutputSchema,

@@ -1,5 +1,17 @@
 import { DEFAULT_LOCALE, DEFAULT_TIMEZONE } from './agent-schema.js';
 
+type FinanceKind = 'asset' | 'liability';
+
+type CreateFinanceItemResult = {
+  id: number;
+  kind: FinanceKind;
+  category: string;
+  amount: number;
+  createdAt: string;
+};
+
+const DEFAULT_WEBSITE_DATA_BASE_URL = 'http://localhost:3000';
+
 export function getDateTimeImpl({
   timezone = DEFAULT_TIMEZONE,
   locale = DEFAULT_LOCALE,
@@ -69,5 +81,98 @@ export function lookupFaqImpl({ topic }: { topic: string }) {
     topic,
     answer: hit.answer,
     source: hit.source,
+  };
+}
+
+function parseFinanceKind(kind: string): FinanceKind | null {
+  const normalized = kind.trim().toLowerCase();
+  if (normalized === 'asset' || normalized === 'liability') {
+    return normalized;
+  }
+  return null;
+}
+
+function resolveWebsiteDataBaseUrl(): string {
+  return (
+    process.env.WEBSITE_DATA_BASE_URL?.trim() ||
+    process.env.WEBSITE_BASE_URL?.trim() ||
+    DEFAULT_WEBSITE_DATA_BASE_URL
+  );
+}
+
+export async function createFinanceItemImpl({
+  kind,
+  category,
+  amount,
+}: {
+  kind: string;
+  category: string;
+  amount: number;
+}): Promise<{
+  item: CreateFinanceItemResult;
+  baseUrl: string;
+}> {
+  const parsedKind = parseFinanceKind(kind);
+  if (!parsedKind) {
+    throw new Error('kind must be "asset" or "liability"');
+  }
+
+  const cleanedCategory = category.trim();
+  if (!cleanedCategory) {
+    throw new Error('category is required');
+  }
+
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new Error('amount must be a non-negative number');
+  }
+
+  const baseUrl = resolveWebsiteDataBaseUrl();
+  const response = await fetch(`${baseUrl}/api/data/items`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      kind: parsedKind,
+      category: cleanedCategory,
+      amount: Math.round(amount * 100) / 100,
+    }),
+    cache: 'no-store',
+  });
+
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const errorMessage =
+      payload &&
+      typeof payload === 'object' &&
+      'error' in payload &&
+      typeof payload.error === 'string'
+        ? payload.error
+        : `website data API failed (${response.status})`;
+    throw new Error(errorMessage);
+  }
+
+  const item =
+    payload &&
+    typeof payload === 'object' &&
+    'item' in payload &&
+    payload.item &&
+    typeof payload.item === 'object'
+      ? (payload.item as CreateFinanceItemResult)
+      : null;
+
+  if (!item) {
+    throw new Error('website data API returned invalid payload');
+  }
+
+  return {
+    item,
+    baseUrl,
   };
 }

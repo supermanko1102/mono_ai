@@ -9,6 +9,7 @@
 - Agent tools:
   - `getDateTime`：查指定時區時間
   - `calculate`：數學運算
+  - `createFinanceItem`：新增資產/負債資料到 website SQLite
   - `lookupFaq`：查本地 FAQ
 
 ## 1) 設定環境變數
@@ -26,6 +27,7 @@ cp .env.example .env
 可選：
 
 - `OPENAI_MODEL=gpt-4.1-mini`（預設即此值）
+- `WEBSITE_DATA_BASE_URL=http://localhost:3000`（預設為此值）
 
 Provider 選擇順序：
 
@@ -64,6 +66,17 @@ curl -sS -X POST http://localhost:3010/api/agent/chat \
     "message": "帶我去 docs",
     "availableRoutes": ["/", "/pricing", "/docs", "/support"],
     "availableModals": ["pricing-comparison", "docs-quickstart", "support-contact"]
+  }'
+```
+
+### 透過 Agent 新增資料（需 website backend 在 local 啟動）
+
+```bash
+curl -sS -X POST http://localhost:3010/api/agent/chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "sessionId": "demo-create-1",
+    "message": "幫我新增一筆資產，category 是 ETF，amount 是 2500"
   }'
 ```
 
