@@ -12,6 +12,7 @@ import {
 import {
   calculateImpl,
   createFinanceItemImpl,
+  getFinanceOverviewImpl,
   getDateTimeImpl,
   lookupFaqImpl,
 } from './tool-impl.js';
@@ -76,6 +77,47 @@ const lookupFaq = ai.defineTool(
   async ({ topic }) => lookupFaqImpl({ topic })
 );
 
+const getFinanceOverview = ai.defineTool(
+  {
+    name: 'getFinanceOverview',
+    description:
+      'Get finance summary and recent asset/liability trend points. Use for chart, distribution, trend, breakdown questions.',
+    inputSchema: z.object({
+      rangeDays: z.number().min(3).max(30).default(7),
+    }),
+    outputSchema: z.object({
+      summary: z.object({
+        totals: z.object({
+          assets: z.number(),
+          liabilities: z.number(),
+          netWorth: z.number(),
+        }),
+        assets: z.array(
+          z.object({
+            label: z.string(),
+            amount: z.number(),
+          })
+        ),
+        liabilities: z.array(
+          z.object({
+            label: z.string(),
+            amount: z.number(),
+          })
+        ),
+      }),
+      trend: z.array(
+        z.object({
+          label: z.string(),
+          assets: z.number(),
+          liabilities: z.number(),
+        })
+      ),
+      baseUrl: z.string(),
+    }),
+  },
+  async ({ rangeDays }) => getFinanceOverviewImpl({ rangeDays })
+);
+
 const createFinanceItem = ai.defineTool(
   {
     name: 'createFinanceItem',
@@ -115,7 +157,7 @@ export async function runGeminiAgent(input: AgentInput): Promise<AgentOutput> {
       content: [{ text: message.content }],
     })),
     prompt: input.message,
-    tools: [getDateTime, calculate, createFinanceItem, lookupFaq],
+    tools: [getDateTime, calculate, createFinanceItem, getFinanceOverview, lookupFaq],
     maxTurns: 5,
     output: {
       schema: AgentOutputSchema,
@@ -129,6 +171,7 @@ export async function runGeminiAgent(input: AgentInput): Promise<AgentOutput> {
       availableRoutes: input.availableRoutes,
       availableModals: input.availableModals,
       actions: output.actions,
+      ui: output.ui,
       navigateTo: output.navigateTo,
       openModalId: output.openModalId,
     });

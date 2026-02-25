@@ -6,7 +6,7 @@
 
 - `navigate` action：導頁到 `/, /pricing, /docs, /support`
 - `open_modal` action：開啟指定 modal
-- 透過 Next API route proxy 到 AI server（`/api/agent/chat`）
+- 透過 Next API route proxy 到 AI server（`/api/agent/chat/stream`）
 - 本機資料 API（SQLite）：
   - `GET /api/data/summary`
   - `GET /api/data/items`

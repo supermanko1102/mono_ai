@@ -26,6 +26,33 @@ export type AgentActionContract =
   | AgentActionNavigateContract
   | AgentActionOpenModalContract;
 
+export type AgentUiSliceContract = {
+  label: string;
+  amount: number;
+};
+
+export type AgentUiTrendPointContract = {
+  label: string;
+  assets: number;
+  liabilities: number;
+};
+
+export type AgentUiAssetDonutContract = {
+  type: 'asset_donut';
+  title?: string;
+  items: AgentUiSliceContract[];
+};
+
+export type AgentUiFinanceTrendLineContract = {
+  type: 'finance_trend_line';
+  title?: string;
+  points: AgentUiTrendPointContract[];
+};
+
+export type AgentUiBlockContract =
+  | AgentUiAssetDonutContract
+  | AgentUiFinanceTrendLineContract;
+
 export type AgentInputContract = {
   message: string;
   history?: AgentHistoryMessageContract[];
@@ -39,6 +66,7 @@ export type AgentOutputContract = {
   answer: string;
   usedTools?: string[];
   actions?: AgentActionContract[];
+  ui?: AgentUiBlockContract[];
   navigateTo?: string;
   openModalId?: string;
 };

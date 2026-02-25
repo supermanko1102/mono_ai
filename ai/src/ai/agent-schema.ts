@@ -25,6 +25,30 @@ const AgentActionSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+const AgentUiSliceSchema = z.object({
+  label: z.string().min(1),
+  amount: z.number().nonnegative(),
+});
+
+const AgentUiTrendPointSchema = z.object({
+  label: z.string().min(1),
+  assets: z.number().nonnegative(),
+  liabilities: z.number().nonnegative(),
+});
+
+const AgentUiBlockSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('asset_donut'),
+    title: z.string().optional(),
+    items: z.array(AgentUiSliceSchema).min(1).max(12),
+  }),
+  z.object({
+    type: z.literal('finance_trend_line'),
+    title: z.string().optional(),
+    points: z.array(AgentUiTrendPointSchema).min(2).max(60),
+  }),
+]);
+
 export const AgentHistoryMessageSchema = z.object({
   role: z.enum(['user', 'model']),
   content: z.string().min(1),
@@ -43,6 +67,7 @@ export const AgentOutputSchema = z.object({
   answer: z.string(),
   usedTools: z.array(z.string()).default([]),
   actions: z.array(AgentActionSchema).default([]),
+  ui: z.array(AgentUiBlockSchema).default([]),
   navigateTo: z.string().optional(),
   openModalId: z.string().optional(),
 });
@@ -50,6 +75,7 @@ export const AgentOutputSchema = z.object({
 export type AgentInput = z.infer<typeof AgentInputSchema>;
 export type AgentOutput = z.infer<typeof AgentOutputSchema>;
 export type AgentAction = AgentOutput['actions'][number];
+export type AgentUiBlock = AgentOutput['ui'][number];
 
 type _AgentInputCompat = AgentInput extends AgentInputContract ? true : never;
 type _AgentOutputCompat = AgentOutput extends AgentOutputContract ? true : never;

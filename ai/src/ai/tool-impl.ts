@@ -10,6 +10,56 @@ type CreateFinanceItemResult = {
   createdAt: string;
 };
 
+type FinanceSummaryPayload = {
+  totals?: {
+    assets?: number;
+    liabilities?: number;
+    netWorth?: number;
+  };
+  assets?: Array<{
+    label?: string;
+    amount?: number;
+  }>;
+  liabilities?: Array<{
+    label?: string;
+    amount?: number;
+  }>;
+};
+
+type FinanceItemsPayload = {
+  items?: Array<{
+    kind?: FinanceKind;
+    amount?: number;
+    createdAt?: string;
+  }>;
+};
+
+type FinanceTrendPoint = {
+  label: string;
+  assets: number;
+  liabilities: number;
+};
+
+export type FinanceOverviewResult = {
+  summary: {
+    totals: {
+      assets: number;
+      liabilities: number;
+      netWorth: number;
+    };
+    assets: Array<{
+      label: string;
+      amount: number;
+    }>;
+    liabilities: Array<{
+      label: string;
+      amount: number;
+    }>;
+  };
+  trend: FinanceTrendPoint[];
+  baseUrl: string;
+};
+
 const DEFAULT_WEBSITE_DATA_BASE_URL = 'http://localhost:3000';
 
 export function getDateTimeImpl({
@@ -100,6 +150,100 @@ function resolveWebsiteDataBaseUrl(): string {
   );
 }
 
+function parseUtcDate(input: string): Date | null {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed.includes('T')
+    ? trimmed
+    : trimmed.replace(' ', 'T');
+  const withTimezone = /Z|[+-]\d{2}:\d{2}$/.test(normalized)
+    ? normalized
+    : `${normalized}Z`;
+  const parsed = new Date(withTimezone);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function toDayKeyUtc(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function buildTrendPoints(
+  items: Array<{
+    kind: FinanceKind;
+    amount: number;
+    createdAt: string;
+  }>,
+  rangeDays: number
+): FinanceTrendPoint[] {
+  const today = new Date();
+  const start = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
+  );
+  start.setUTCDate(start.getUTCDate() - (rangeDays - 1));
+  const startKey = toDayKeyUtc(start);
+
+  const dailyDelta = new Map<string, { assets: number; liabilities: number }>();
+  let seedAssets = 0;
+  let seedLiabilities = 0;
+
+  for (const item of items) {
+    const parsedDate = parseUtcDate(item.createdAt);
+    if (!parsedDate) {
+      continue;
+    }
+
+    const key = toDayKeyUtc(parsedDate);
+    const amount = Number.isFinite(item.amount) ? item.amount : 0;
+    if (key < startKey) {
+      if (item.kind === 'asset') {
+        seedAssets += amount;
+      } else {
+        seedLiabilities += amount;
+      }
+      continue;
+    }
+
+    const row = dailyDelta.get(key) ?? { assets: 0, liabilities: 0 };
+    if (item.kind === 'asset') {
+      row.assets += amount;
+    } else {
+      row.liabilities += amount;
+    }
+    dailyDelta.set(key, row);
+  }
+
+  let runningAssets = seedAssets;
+  let runningLiabilities = seedLiabilities;
+  const points: FinanceTrendPoint[] = [];
+
+  for (let i = 0; i < rangeDays; i += 1) {
+    const day = new Date(start);
+    day.setUTCDate(start.getUTCDate() + i);
+    const key = toDayKeyUtc(day);
+    const delta = dailyDelta.get(key);
+    if (delta) {
+      runningAssets += delta.assets;
+      runningLiabilities += delta.liabilities;
+    }
+
+    points.push({
+      label: key.slice(5),
+      assets: Math.round(runningAssets * 100) / 100,
+      liabilities: Math.round(runningLiabilities * 100) / 100,
+    });
+  }
+
+  return points;
+}
+
 export async function createFinanceItemImpl({
   kind,
   category,
@@ -173,6 +317,134 @@ export async function createFinanceItemImpl({
 
   return {
     item,
+    baseUrl,
+  };
+}
+
+export async function getFinanceOverviewImpl({
+  rangeDays = 7,
+}: {
+  rangeDays?: number;
+}): Promise<FinanceOverviewResult> {
+  const baseUrl = resolveWebsiteDataBaseUrl();
+  const days = Number.isFinite(rangeDays)
+    ? Math.max(3, Math.min(30, Math.trunc(rangeDays)))
+    : 7;
+
+  const [summaryResp, itemsResp] = await Promise.all([
+    fetch(`${baseUrl}/api/data/summary`, {
+      cache: 'no-store',
+    }),
+    fetch(`${baseUrl}/api/data/items?limit=500`, {
+      cache: 'no-store',
+    }),
+  ]);
+
+  if (!summaryResp.ok) {
+    throw new Error(`website summary API failed (${summaryResp.status})`);
+  }
+  if (!itemsResp.ok) {
+    throw new Error(`website items API failed (${itemsResp.status})`);
+  }
+
+  const rawSummary = (await summaryResp.json()) as FinanceSummaryPayload;
+  const rawItems = (await itemsResp.json()) as FinanceItemsPayload;
+
+  const assets =
+    rawSummary.assets
+      ?.map((item) => ({
+        label: typeof item.label === 'string' ? item.label.trim() : '',
+        amount:
+          typeof item.amount === 'number' && Number.isFinite(item.amount)
+            ? item.amount
+            : Number.NaN,
+      }))
+      .filter(
+        (
+          item
+        ): item is {
+          label: string;
+          amount: number;
+        } => !!item.label && Number.isFinite(item.amount) && item.amount >= 0
+      ) ?? [];
+
+  const liabilities =
+    rawSummary.liabilities
+      ?.map((item) => ({
+        label: typeof item.label === 'string' ? item.label.trim() : '',
+        amount:
+          typeof item.amount === 'number' && Number.isFinite(item.amount)
+            ? item.amount
+            : Number.NaN,
+      }))
+      .filter(
+        (
+          item
+        ): item is {
+          label: string;
+          amount: number;
+        } => !!item.label && Number.isFinite(item.amount) && item.amount >= 0
+      ) ?? [];
+
+  const totals = {
+    assets:
+      typeof rawSummary.totals?.assets === 'number' &&
+      Number.isFinite(rawSummary.totals.assets)
+        ? rawSummary.totals.assets
+        : assets.reduce((sum, item) => sum + item.amount, 0),
+    liabilities:
+      typeof rawSummary.totals?.liabilities === 'number' &&
+      Number.isFinite(rawSummary.totals.liabilities)
+        ? rawSummary.totals.liabilities
+        : liabilities.reduce((sum, item) => sum + item.amount, 0),
+    netWorth:
+      typeof rawSummary.totals?.netWorth === 'number' &&
+      Number.isFinite(rawSummary.totals.netWorth)
+        ? rawSummary.totals.netWorth
+        : 0,
+  };
+  if (!Number.isFinite(totals.netWorth)) {
+    totals.netWorth = totals.assets - totals.liabilities;
+  }
+
+  const items =
+    rawItems.items
+      ?.map((item) => ({
+        kind: item.kind === 'asset' || item.kind === 'liability' ? item.kind : null,
+        amount:
+          typeof item.amount === 'number' && Number.isFinite(item.amount)
+            ? item.amount
+            : Number.NaN,
+        createdAt:
+          typeof item.createdAt === 'string' ? item.createdAt.trim() : '',
+      }))
+      .filter(
+        (
+          item
+        ): item is {
+          kind: FinanceKind;
+          amount: number;
+          createdAt: string;
+        } =>
+          !!item.kind &&
+          Number.isFinite(item.amount) &&
+          item.amount >= 0 &&
+          !!item.createdAt
+      ) ?? [];
+
+  const trend = buildTrendPoints(items, days);
+
+  return {
+    summary: {
+      totals: {
+        assets: Math.round(totals.assets * 100) / 100,
+        liabilities: Math.round(totals.liabilities * 100) / 100,
+        netWorth: Math.round((totals.assets - totals.liabilities) * 100) / 100,
+      },
+      assets,
+      liabilities,
+    },
+    trend,
     baseUrl,
   };
 }

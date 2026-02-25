@@ -8,7 +8,8 @@ import {
   AgentHistoryMessageSchema,
   AgentInputSchema,
   aiAgentFlow,
-  runAgent,
+  type AgentOutput,
+  streamAgent,
 } from './ai/agent.js';
 
 const ChatRequestSchema = z.object({
@@ -30,6 +31,49 @@ const sessions = new Map<
   Array<z.infer<typeof AgentHistoryMessageSchema>>
 >();
 
+function toAgentInput(
+  body: z.infer<typeof ChatRequestSchema>,
+  history: Array<z.infer<typeof AgentHistoryMessageSchema>>
+) {
+  return AgentInputSchema.parse({
+    message: body.message,
+    history,
+    timezone: body.timezone,
+    locale: body.locale,
+    availableRoutes: body.availableRoutes,
+    availableModals: body.availableModals,
+  });
+}
+
+function updateSessionHistory({
+  sessionId,
+  prev,
+  userMessage,
+  modelAnswer,
+}: {
+  sessionId: string;
+  prev: Array<z.infer<typeof AgentHistoryMessageSchema>>;
+  userMessage: string;
+  modelAnswer: string;
+}) {
+  const nextHistory = [
+    ...prev,
+    { role: 'user', content: userMessage } as const,
+    { role: 'model', content: modelAnswer } as const,
+  ].slice(-20);
+  sessions.set(sessionId, nextHistory);
+  return nextHistory;
+}
+
+function sendSseEvent(
+  res: express.Response,
+  eventName: string,
+  payload: unknown
+) {
+  res.write(`event: ${eventName}\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
@@ -39,7 +83,7 @@ app.get('/', (_req, res) => {
     name: 'express-genkit-ai-agent',
     endpoints: {
       health: 'GET /health',
-      chat: 'POST /api/agent/chat',
+      chatStream: 'POST /api/agent/chat/stream (SSE)',
       flow: 'POST /api/agent/flow (Genkit expressHandler format: { data: ... })',
     },
   });
@@ -47,39 +91,62 @@ app.get('/', (_req, res) => {
 
 app.post('/api/agent/flow', expressHandler(aiAgentFlow));
 
-app.post('/api/agent/chat', async (req, res) => {
+app.post('/api/agent/chat/stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
   try {
     const body = ChatRequestSchema.parse(req.body);
     const prev = sessions.get(body.sessionId) ?? [];
-
-    const agentInput = AgentInputSchema.parse({
-      message: body.message,
-      history: prev,
-      timezone: body.timezone,
-      locale: body.locale,
-      availableRoutes: body.availableRoutes,
-      availableModals: body.availableModals,
+    const agentInput = toAgentInput(body, prev);
+    sendSseEvent(res, 'message_start', {
+      sessionId: body.sessionId,
     });
 
-    const result = await runAgent(agentInput);
+    let finalResult: AgentOutput | undefined;
 
-    const nextHistory = [
-      ...prev,
-      { role: 'user', content: body.message } as const,
-      { role: 'model', content: result.answer } as const,
-    ].slice(-20);
+    for await (const event of streamAgent(agentInput)) {
+      if (event.type === 'text_delta') {
+        sendSseEvent(res, 'text_delta', { delta: event.delta });
+        continue;
+      }
+      finalResult = event.output;
+    }
+    if (!finalResult) {
+      throw new Error('Agent stream ended without final result');
+    }
 
-    sessions.set(body.sessionId, nextHistory);
-
-    res.json({
+    const nextHistory = updateSessionHistory({
       sessionId: body.sessionId,
-      ...result,
+      prev,
+      userMessage: body.message,
+      modelAnswer: finalResult.answer,
+    });
+
+    for (const uiBlock of finalResult.ui ?? []) {
+      sendSseEvent(res, 'ui', { block: uiBlock });
+    }
+
+    sendSseEvent(res, 'actions', {
+      actions: finalResult.actions ?? [],
+      navigateTo: finalResult.navigateTo,
+      openModalId: finalResult.openModalId,
+    });
+
+    sendSseEvent(res, 'done', {
+      sessionId: body.sessionId,
+      ...finalResult,
       historyCount: nextHistory.length,
     });
+    res.end();
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    const isServerMisconfig = message.includes('Missing API key');
-    res.status(isServerMisconfig ? 500 : 400).json({ error: message });
+    sendSseEvent(res, 'error', {
+      error: message,
+    });
+    res.end();
   }
 });
 

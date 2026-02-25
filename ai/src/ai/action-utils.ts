@@ -2,7 +2,7 @@ import {
   DEFAULT_AVAILABLE_MODALS,
   DEFAULT_AVAILABLE_ROUTES,
 } from '../shared/agent-contract.js';
-import type { AgentAction, AgentOutput } from './agent-schema.js';
+import type { AgentAction, AgentOutput, AgentUiBlock } from './agent-schema.js';
 
 function normalizeRoute(route: string): string | undefined {
   const trimmed = route.trim();
@@ -21,6 +21,25 @@ function normalizeModalId(modalId: string): string | undefined {
     return undefined;
   }
   return trimmed;
+}
+
+function normalizeUiLabel(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed.slice(0, 40);
+}
+
+function normalizeUiTitle(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed.slice(0, 80);
 }
 
 function normalizeAvailableRoutes(routes: string[]): string[] {
@@ -79,12 +98,87 @@ function parseActionTags(text: string): {
   };
 }
 
+function normalizeUiBlocks(uiBlocks: AgentUiBlock[] | undefined): AgentUiBlock[] {
+  if (!uiBlocks || uiBlocks.length === 0) {
+    return [];
+  }
+
+  return uiBlocks
+    .map((block): AgentUiBlock | null => {
+      if (block.type === 'asset_donut') {
+        const normalizedItems = block.items
+          .map((item) => ({
+            label: normalizeUiLabel(item.label),
+            amount: Number.isFinite(item.amount) ? item.amount : Number.NaN,
+          }))
+          .filter(
+            (
+              item
+            ): item is {
+              label: string;
+              amount: number;
+            } =>
+              !!item.label &&
+              Number.isFinite(item.amount) &&
+              item.amount >= 0
+          )
+          .slice(0, 12);
+
+        if (normalizedItems.length === 0) {
+          return null;
+        }
+
+        return {
+          type: 'asset_donut',
+          title: normalizeUiTitle(block.title),
+          items: normalizedItems,
+        };
+      }
+
+      const normalizedPoints = block.points
+        .map((point) => ({
+          label: normalizeUiLabel(point.label),
+          assets: Number.isFinite(point.assets) ? point.assets : Number.NaN,
+          liabilities: Number.isFinite(point.liabilities)
+            ? point.liabilities
+            : Number.NaN,
+        }))
+        .filter(
+          (
+            point
+          ): point is {
+            label: string;
+            assets: number;
+            liabilities: number;
+          } =>
+            !!point.label &&
+            Number.isFinite(point.assets) &&
+            point.assets >= 0 &&
+            Number.isFinite(point.liabilities) &&
+            point.liabilities >= 0
+        )
+        .slice(0, 60);
+
+      if (normalizedPoints.length < 2) {
+        return null;
+      }
+
+      return {
+        type: 'finance_trend_line',
+        title: normalizeUiTitle(block.title),
+        points: normalizedPoints,
+      };
+    })
+    .filter((block): block is AgentUiBlock => block !== null);
+}
+
 export function finalizeAgentOutput({
   answer,
   usedTools,
   availableRoutes,
   availableModals,
   actions,
+  ui,
   navigateTo,
   openModalId,
 }: {
@@ -93,6 +187,7 @@ export function finalizeAgentOutput({
   availableRoutes: string[];
   availableModals: string[];
   actions?: AgentAction[];
+  ui?: AgentUiBlock[];
   navigateTo?: string;
   openModalId?: string;
 }): AgentOutput {
@@ -149,11 +244,13 @@ export function finalizeAgentOutput({
   const firstNavigateAction = normalizedActions.find(
     (action) => action.type === 'navigate'
   );
+  const normalizedUi = normalizeUiBlocks(ui);
 
   return {
     answer: parsed.answer || '目前沒有可用回覆，請再試一次。',
     usedTools: Array.from(new Set(usedTools)),
     actions: normalizedActions,
+    ui: normalizedUi,
     ...(firstNavigateAction ? { navigateTo: firstNavigateAction.to } : {}),
     ...(validModalIds[0] ? { openModalId: validModalIds[0] } : {}),
   };
@@ -170,9 +267,13 @@ export function createSystemPrompt(
     'Answer in Traditional Chinese unless user asks otherwise.',
     'Use tools when they improve accuracy.',
     'When user asks to add finance data, use createFinanceItem with kind/category/amount.',
+    'When user asks for finance distribution or trend visualization, call getFinanceOverview first.',
     `Allowed website routes: ${routes}.`,
     `Allowed modal ids: ${modals}.`,
     'If you can return structured fields, use actions with { type: "navigate", to: "/route" } and { type: "open_modal", id: "modal-id" }.',
+    'If user asks for chart/visualization/data distribution, include UI blocks in field ui.',
+    'Supported ui block types: asset_donut and finance_trend_line.',
+    'asset_donut needs items: [{ label, amount }]. finance_trend_line needs points: [{ label, assets, liabilities }].',
     'When user clearly asks to go/open/navigate to a page, append one tag exactly like <<NAVIGATE:/route>> at the end of your answer.',
     'When user asks to open a modal/dialog/popup, append one tag like <<OPEN_MODAL:modal-id>>.',
     'Only use allowed routes.',

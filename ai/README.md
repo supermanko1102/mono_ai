@@ -4,7 +4,7 @@
 
 ## 功能
 
-- `POST /api/agent/chat` 一般聊天 API（支援 session 記憶）
+- `POST /api/agent/chat/stream` 串流聊天 API（SSE + session 記憶）
 - `POST /api/agent/flow` Genkit Flow API（`expressHandler` 格式）
 - Agent tools:
   - `getDateTime`：查指定時區時間
@@ -56,10 +56,10 @@ npm start
 curl -sS http://localhost:3010/health
 ```
 
-### Chat API
+### Chat Stream API (SSE)
 
 ```bash
-curl -sS -X POST http://localhost:3010/api/agent/chat \
+curl -N -X POST http://localhost:3010/api/agent/chat/stream \
   -H 'Content-Type: application/json' \
   -d '{
     "sessionId": "demo-1",
@@ -72,7 +72,7 @@ curl -sS -X POST http://localhost:3010/api/agent/chat \
 ### 透過 Agent 新增資料（需 website backend 在 local 啟動）
 
 ```bash
-curl -sS -X POST http://localhost:3010/api/agent/chat \
+curl -N -X POST http://localhost:3010/api/agent/chat/stream \
   -H 'Content-Type: application/json' \
   -d '{
     "sessionId": "demo-create-1",
@@ -80,7 +80,7 @@ curl -sS -X POST http://localhost:3010/api/agent/chat \
   }'
 ```
 
-若 agent 判斷要執行前端動作，會回傳：
+SSE 的 `done` event payload 中，若 agent 判斷要執行前端動作，會包含：
 
 ```json
 {
