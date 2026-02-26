@@ -49,6 +49,14 @@ const AgentUiBlockSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+const AgentSectionSchema = z.object({
+  id: z.string().min(1),
+  slot: z.literal('after-b'),
+  mode: z.enum(['ephemeral']).default('ephemeral'),
+  title: z.string().optional(),
+  blocks: z.array(AgentUiBlockSchema).min(1).max(6),
+});
+
 export const AgentHistoryMessageSchema = z.object({
   role: z.enum(['user', 'model']),
   content: z.string().min(1),
@@ -68,6 +76,7 @@ export const AgentOutputSchema = z.object({
   usedTools: z.array(z.string()).default([]),
   actions: z.array(AgentActionSchema).default([]),
   ui: z.array(AgentUiBlockSchema).default([]),
+  sections: z.array(AgentSectionSchema).default([]),
   navigateTo: z.string().optional(),
   openModalId: z.string().optional(),
 });
@@ -76,6 +85,7 @@ export type AgentInput = z.infer<typeof AgentInputSchema>;
 export type AgentOutput = z.infer<typeof AgentOutputSchema>;
 export type AgentAction = AgentOutput['actions'][number];
 export type AgentUiBlock = AgentOutput['ui'][number];
+export type AgentSection = AgentOutput['sections'][number];
 
 type _AgentInputCompat = AgentInput extends AgentInputContract ? true : never;
 type _AgentOutputCompat = AgentOutput extends AgentOutputContract ? true : never;

@@ -129,6 +129,10 @@ app.post('/api/agent/chat/stream', async (req, res) => {
       sendSseEvent(res, 'ui', { block: uiBlock });
     }
 
+    for (const section of finalResult.sections ?? []) {
+      sendSseEvent(res, 'section', { section });
+    }
+
     sendSseEvent(res, 'actions', {
       actions: finalResult.actions ?? [],
       navigateTo: finalResult.navigateTo,

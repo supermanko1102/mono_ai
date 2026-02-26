@@ -18,6 +18,7 @@ import {
   type AllocationItem,
 } from "@/lib/server/finance-store";
 import { AddFinanceItemModal } from "@/components/add-finance-item-modal";
+import { RuntimeSectionHost } from "@/components/runtime-section-host";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -152,6 +153,8 @@ export default function Home() {
               negativeValues
             />
           </section>
+
+          <RuntimeSectionHost slot="after-b" />
 
           <section className="mt-3 grid gap-3 md:grid-cols-3">
             <MiniCard

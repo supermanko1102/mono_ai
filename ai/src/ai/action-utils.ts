@@ -2,7 +2,12 @@ import {
   DEFAULT_AVAILABLE_MODALS,
   DEFAULT_AVAILABLE_ROUTES,
 } from '../shared/agent-contract.js';
-import type { AgentAction, AgentOutput, AgentUiBlock } from './agent-schema.js';
+import type {
+  AgentAction,
+  AgentOutput,
+  AgentSection,
+  AgentUiBlock,
+} from './agent-schema.js';
 
 function normalizeRoute(route: string): string | undefined {
   const trimmed = route.trim();
@@ -40,6 +45,21 @@ function normalizeUiTitle(value: string | undefined): string | undefined {
     return undefined;
   }
   return trimmed.slice(0, 80);
+}
+
+function normalizeSectionId(value: string): string | undefined {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) {
+    return undefined;
+  }
+  const normalized = trimmed
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized.slice(0, 48);
 }
 
 function normalizeAvailableRoutes(routes: string[]): string[] {
@@ -172,6 +192,34 @@ function normalizeUiBlocks(uiBlocks: AgentUiBlock[] | undefined): AgentUiBlock[]
     .filter((block): block is AgentUiBlock => block !== null);
 }
 
+function normalizeSections(sections: AgentSection[] | undefined): AgentSection[] {
+  if (!sections || sections.length === 0) {
+    return [];
+  }
+
+  return sections
+    .map((section, index): AgentSection | null => {
+      if (section.slot !== 'after-b') {
+        return null;
+      }
+      const blocks = normalizeUiBlocks(section.blocks);
+      if (blocks.length === 0) {
+        return null;
+      }
+      return {
+        id:
+          normalizeSectionId(section.id) ??
+          `section-c-${Date.now()}-${index + 1}`,
+        slot: 'after-b',
+        mode: 'ephemeral',
+        title: normalizeUiTitle(section.title),
+        blocks,
+      };
+    })
+    .filter((section): section is AgentSection => section !== null)
+    .slice(0, 3);
+}
+
 export function finalizeAgentOutput({
   answer,
   usedTools,
@@ -179,6 +227,7 @@ export function finalizeAgentOutput({
   availableModals,
   actions,
   ui,
+  sections,
   navigateTo,
   openModalId,
 }: {
@@ -188,6 +237,7 @@ export function finalizeAgentOutput({
   availableModals: string[];
   actions?: AgentAction[];
   ui?: AgentUiBlock[];
+  sections?: AgentSection[];
   navigateTo?: string;
   openModalId?: string;
 }): AgentOutput {
@@ -245,12 +295,14 @@ export function finalizeAgentOutput({
     (action) => action.type === 'navigate'
   );
   const normalizedUi = normalizeUiBlocks(ui);
+  const normalizedSections = normalizeSections(sections);
 
   return {
     answer: parsed.answer || '目前沒有可用回覆，請再試一次。',
     usedTools: Array.from(new Set(usedTools)),
     actions: normalizedActions,
     ui: normalizedUi,
+    sections: normalizedSections,
     ...(firstNavigateAction ? { navigateTo: firstNavigateAction.to } : {}),
     ...(validModalIds[0] ? { openModalId: validModalIds[0] } : {}),
   };
@@ -274,6 +326,7 @@ export function createSystemPrompt(
     'If user asks for chart/visualization/data distribution, include UI blocks in field ui.',
     'Supported ui block types: asset_donut and finance_trend_line.',
     'asset_donut needs items: [{ label, amount }]. finance_trend_line needs points: [{ label, assets, liabilities }].',
+    'If user asks to add a new page section/canvas/module, return sections with slot "after-b" and one or more ui blocks.',
     'When user clearly asks to go/open/navigate to a page, append one tag exactly like <<NAVIGATE:/route>> at the end of your answer.',
     'When user asks to open a modal/dialog/popup, append one tag like <<OPEN_MODAL:modal-id>>.',
     'Only use allowed routes.',

@@ -172,6 +172,7 @@ export async function runGeminiAgent(input: AgentInput): Promise<AgentOutput> {
       availableModals: input.availableModals,
       actions: output.actions,
       ui: output.ui,
+      sections: output.sections,
       navigateTo: output.navigateTo,
       openModalId: output.openModalId,
     });

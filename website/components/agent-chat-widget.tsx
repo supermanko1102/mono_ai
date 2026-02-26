@@ -5,12 +5,9 @@ import type { FormEvent } from "react";
 import { MessageCircle, Send, X } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 
-import type {
-  AgentAction,
-  AgentChatResponse,
-  AgentUiBlock,
-} from "@/lib/agent-contract";
-import { isAgentUiBlock } from "@/lib/agent-contract";
+import type { AgentAction, AgentSection, AgentUiBlock } from "@/lib/agent-contract";
+import { isAgentSection } from "@/lib/agent-guards";
+import { mergeActions, readAgentStream } from "@/lib/agent-stream";
 import {
   AGENT_MODAL_IDS,
   AGENT_ROUTES,
@@ -19,6 +16,8 @@ import {
   normalizeModalId,
   normalizePath,
 } from "@/lib/agent-registry";
+import { emitAgentSectionCreate } from "@/lib/runtime-section-events";
+import { AgentUiBlockRenderer } from "@/components/agent-ui-block-renderer";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,53 +41,9 @@ function getOrCreateSessionId() {
     return existing;
   }
 
-  const created = `session-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
+  const created = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   window.localStorage.setItem(SESSION_KEY, created);
   return created;
-}
-
-function mergeActions(response: AgentChatResponse): AgentAction[] {
-  const actions = [...(response.actions ?? [])];
-  if (response.navigateTo && !actions.some((action) => action.type === "navigate")) {
-    actions.push({ type: "navigate", to: response.navigateTo });
-  }
-  if (
-    response.openModalId &&
-    !actions.some((action) => action.type === "open_modal")
-  ) {
-    actions.push({ type: "open_modal", id: response.openModalId });
-  }
-  return actions;
-}
-
-function parseSseEvent(rawBlock: string): { event: string; data: string } | null {
-  const lines = rawBlock
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .filter((line) => line.length > 0);
-  if (lines.length === 0) {
-    return null;
-  }
-
-  let event = "message";
-  const dataLines: string[] = [];
-
-  for (const line of lines) {
-    if (line.startsWith("event:")) {
-      event = line.slice("event:".length).trim();
-      continue;
-    }
-    if (line.startsWith("data:")) {
-      dataLines.push(line.slice("data:".length).trim());
-    }
-  }
-
-  return {
-    event,
-    data: dataLines.join("\n"),
-  };
 }
 
 function withMessageContent(
@@ -209,21 +164,14 @@ export function AgentChatWidget() {
       return;
     }
 
+    const assistantMessageId = makeId();
     setLoading(true);
     setMessages((prev) => [
       ...prev,
       { id: makeId(), role: "user", content: text },
+      { id: assistantMessageId, role: "assistant", content: "" },
     ]);
     setInput("");
-    const assistantMessageId = makeId();
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: assistantMessageId,
-        role: "assistant",
-        content: "",
-      },
-    ]);
 
     try {
       const response = await fetch("/api/agent/chat/stream", {
@@ -240,93 +188,82 @@ export function AgentChatWidget() {
           availableModals: modalOptions,
         }),
       });
+
       if (!response.ok) {
         const data = (await response.json()) as { error?: string };
         throw new Error(data.error || "Agent request failed");
       }
-      if (!response.body) {
-        throw new Error("Agent stream body is empty");
-      }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
       let pendingActions: AgentAction[] = [];
+      const appliedSectionIds = new Set<string>();
+      const sectionNotices: string[] = [];
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) {
-          break;
+      const applySection = (section: AgentSection) => {
+        if (appliedSectionIds.has(section.id)) {
+          return;
+        }
+        appliedSectionIds.add(section.id);
+        emitAgentSectionCreate(section);
+        sectionNotices.push(`已新增區塊：${section.title ?? section.id}`);
+      };
+
+      for await (const event of readAgentStream(response)) {
+        if (event.type === "text_delta") {
+          setMessages((prev) =>
+            withMessageContent(prev, assistantMessageId, event.delta)
+          );
+          continue;
         }
 
-        buffer += decoder.decode(value, { stream: true });
-        let eventBoundary = buffer.indexOf("\n\n");
+        if (event.type === "ui") {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: makeId(),
+              role: "assistant",
+              content: "",
+              ui: event.block,
+            },
+          ]);
+          continue;
+        }
 
-        while (eventBoundary >= 0) {
-          const rawBlock = buffer.slice(0, eventBoundary);
-          buffer = buffer.slice(eventBoundary + 2);
-          eventBoundary = buffer.indexOf("\n\n");
+        if (event.type === "section") {
+          applySection(event.section);
+          continue;
+        }
 
-          const parsed = parseSseEvent(rawBlock);
-          if (!parsed) {
-            continue;
-          }
+        if (event.type === "actions") {
+          pendingActions = mergeActions(event.response);
+          continue;
+        }
 
-          if (parsed.event === "text_delta") {
-            const payload = JSON.parse(parsed.data) as { delta?: string };
-            const delta = typeof payload.delta === "string" ? payload.delta : "";
-            if (delta) {
-              setMessages((prev) =>
-                withMessageContent(prev, assistantMessageId, delta)
-              );
+        if (event.type === "done") {
+          pendingActions = mergeActions(event.response);
+          if (Array.isArray(event.response.sections)) {
+            for (const section of event.response.sections) {
+              if (isAgentSection(section)) {
+                applySection(section);
+              }
             }
-            continue;
           }
+          setMessages((prev) =>
+            withMessageContentFallback(
+              prev,
+              assistantMessageId,
+              event.response.answer || "目前沒有可用回覆，請再試一次。"
+            )
+          );
+          continue;
+        }
 
-          if (parsed.event === "ui") {
-            const payload = JSON.parse(parsed.data) as { block?: unknown };
-            const block = payload.block;
-            if (isAgentUiBlock(block)) {
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: makeId(),
-                  role: "assistant",
-                  content: "",
-                  ui: block,
-                },
-              ]);
-            }
-            continue;
-          }
-
-          if (parsed.event === "actions") {
-            const payload = JSON.parse(parsed.data) as AgentChatResponse;
-            pendingActions = mergeActions(payload);
-            continue;
-          }
-
-          if (parsed.event === "done") {
-            const payload = JSON.parse(parsed.data) as AgentChatResponse;
-            pendingActions = mergeActions(payload);
-            setMessages((prev) =>
-              withMessageContentFallback(
-                prev,
-                assistantMessageId,
-                payload.answer || "目前沒有可用回覆，請再試一次。"
-              )
-            );
-            continue;
-          }
-
-          if (parsed.event === "error") {
-            const payload = JSON.parse(parsed.data) as { error?: string };
-            throw new Error(payload.error || "Agent stream failed");
-          }
+        if (event.type === "error") {
+          throw new Error(event.error);
         }
       }
 
       runActions(pendingActions);
+      appendSystemMessages(sectionNotices);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       setMessages((prev) => [
@@ -388,7 +325,7 @@ export function AgentChatWidget() {
                   }`}
                 >
                   {message.ui ? (
-                    <AgentUiRenderer block={message.ui} />
+                    <AgentUiBlockRenderer block={message.ui} />
                   ) : (
                     <p>{message.content || "..."}</p>
                   )}
@@ -456,179 +393,5 @@ export function AgentChatWidget() {
         </div>
       ) : null}
     </>
-  );
-}
-
-function AgentUiRenderer({ block }: { block: AgentUiBlock }) {
-  if (block.type === "asset_donut") {
-    return <AssetDonutBlock block={block} />;
-  }
-  return <FinanceTrendLineBlock block={block} />;
-}
-
-const DONUT_COLORS = ["#1f4bb8", "#6f8ee5", "#9eb4ec", "#c6d6f3", "#8ac4ff"];
-
-function formatAudAmount(value: number) {
-  return `AUD ${Math.round(value).toLocaleString("en-AU")}`;
-}
-
-function AssetDonutBlock({
-  block,
-}: {
-  block: Extract<AgentUiBlock, { type: "asset_donut" }>;
-}) {
-  const total = block.items.reduce((sum, item) => sum + item.amount, 0);
-  const fallbackTotal = total > 0 ? total : 1;
-  let angle = 0;
-
-  const gradient = block.items
-    .map((item, index) => {
-      const ratio = item.amount / fallbackTotal;
-      const start = angle;
-      angle += ratio * 360;
-      const end = angle;
-      const color = DONUT_COLORS[index % DONUT_COLORS.length] ?? "#1f4bb8";
-      return `${color} ${start}deg ${end}deg`;
-    })
-    .join(", ");
-
-  return (
-    <div className="space-y-2">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        {block.title ?? "資產配置"}
-      </p>
-      <div className="grid grid-cols-[110px_1fr] gap-3">
-        <div
-          className="grid size-[110px] place-items-center rounded-full"
-          style={{
-            background:
-              gradient ||
-              "conic-gradient(#1f4bb8 0deg 359deg, #c6d6f3 359deg 360deg)",
-          }}
-        >
-          <div className="grid size-[74px] place-items-center rounded-full bg-white text-center shadow-inner">
-            <strong className="text-xs text-slate-800">
-              {Math.round(total).toLocaleString("en-AU")}
-            </strong>
-            <span className="text-[10px] text-slate-500">Total</span>
-          </div>
-        </div>
-        <ul className="space-y-1">
-          {block.items.map((item, index) => {
-            const percent = Math.round((item.amount / fallbackTotal) * 100);
-            const color = DONUT_COLORS[index % DONUT_COLORS.length] ?? "#1f4bb8";
-            return (
-              <li
-                key={`${item.label}-${index}`}
-                className="grid grid-cols-[auto_1fr_auto] items-center gap-2 text-xs"
-              >
-                <span
-                  className="size-2 rounded-full"
-                  style={{ backgroundColor: color }}
-                />
-                <span className="text-slate-700">{item.label}</span>
-                <span className="text-slate-500">
-                  {formatAudAmount(item.amount)} ({percent}%)
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-    </div>
-  );
-}
-
-function FinanceTrendLineBlock({
-  block,
-}: {
-  block: Extract<AgentUiBlock, { type: "finance_trend_line" }>;
-}) {
-  const width = 290;
-  const height = 150;
-  const padding = 18;
-  const maxValue = Math.max(
-    ...block.points.flatMap((point) => [point.assets, point.liabilities]),
-    1
-  );
-  const xStep =
-    block.points.length > 1
-      ? (width - padding * 2) / (block.points.length - 1)
-      : width - padding * 2;
-  const yScale = (height - padding * 2) / maxValue;
-
-  const toPointString = (key: "assets" | "liabilities") =>
-    block.points
-      .map((point, index) => {
-        const x = padding + index * xStep;
-        const y = height - padding - point[key] * yScale;
-        return `${x},${y}`;
-      })
-      .join(" ");
-
-  const assetsPoints = toPointString("assets");
-  const liabilitiesPoints = toPointString("liabilities");
-  const midIndex = Math.floor((block.points.length - 1) / 2);
-
-  return (
-    <div className="space-y-2">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-        {block.title ?? "資產與負債趨勢"}
-      </p>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label="Finance trend line chart"
-        className="h-[150px] w-full rounded-md border border-slate-200 bg-white"
-      >
-        <line
-          x1={padding}
-          x2={width - padding}
-          y1={height - padding}
-          y2={height - padding}
-          stroke="#d5dce7"
-          strokeWidth="1"
-        />
-        <line
-          x1={padding}
-          x2={padding}
-          y1={padding}
-          y2={height - padding}
-          stroke="#d5dce7"
-          strokeWidth="1"
-        />
-        <polyline
-          points={assetsPoints}
-          fill="none"
-          stroke="#1f4bb8"
-          strokeWidth="2.2"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-        <polyline
-          points={liabilitiesPoints}
-          fill="none"
-          stroke="#bf111b"
-          strokeWidth="2.2"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-      </svg>
-      <div className="flex items-center justify-between text-[10px] text-slate-500">
-        <span>{block.points[0]?.label}</span>
-        <span>{block.points[midIndex]?.label}</span>
-        <span>{block.points[block.points.length - 1]?.label}</span>
-      </div>
-      <div className="flex items-center gap-3 text-xs text-slate-600">
-        <span className="inline-flex items-center gap-1">
-          <span className="size-2 rounded-full bg-[#1f4bb8]" />
-          Assets
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="size-2 rounded-full bg-[#bf111b]" />
-          Liabilities
-        </span>
-      </div>
-    </div>
   );
 }

@@ -4,6 +4,7 @@ import { createSystemPrompt, finalizeAgentOutput } from './action-utils.js';
 import {
   type AgentInput,
   type AgentOutput,
+  type AgentSection,
   type AgentUiBlock,
   DEFAULT_LOCALE,
   DEFAULT_TIMEZONE,
@@ -203,6 +204,14 @@ function inferUiBlocksFromContext({
     '比較',
     'compare',
   ]);
+  const wantsSectionCanvas = hasAnyKeyword(sourceText, [
+    'section',
+    'canvas',
+    '畫布',
+    '區塊',
+    '模組',
+    '面板',
+  ]);
 
   const ui: AgentUiBlock[] = [];
 
@@ -229,7 +238,58 @@ function inferUiBlocksFromContext({
     });
   }
 
+  if (
+    ui.length === 0 &&
+    wantsSectionCanvas &&
+    financeOverview.summary.assets.length > 0
+  ) {
+    ui.push({
+      type: 'asset_donut',
+      title: 'Section C：資產配置',
+      items: financeOverview.summary.assets.map((item) => ({
+        label: item.label,
+        amount: item.amount,
+      })),
+    });
+  }
+
   return ui;
+}
+
+function inferSectionsFromContext({
+  message,
+  ui,
+}: {
+  message: string;
+  ui: AgentUiBlock[];
+}): AgentSection[] {
+  if (ui.length === 0) {
+    return [];
+  }
+
+  const wantsSection = hasAnyKeyword(message, [
+    'section',
+    'canvas',
+    '畫布',
+    '區塊',
+    '模組',
+    '面板',
+    '加一塊',
+    '新增一塊',
+  ]);
+  if (!wantsSection) {
+    return [];
+  }
+
+  return [
+    {
+      id: `section-c-${Date.now()}`,
+      slot: 'after-b',
+      mode: 'ephemeral',
+      title: 'Agent Dynamic Section C',
+      blocks: ui,
+    },
+  ];
 }
 
 function toOpenAIHistoryMessage(
@@ -315,30 +375,40 @@ export async function runOpenAIAgent(input: AgentInput): Promise<AgentOutput> {
 
     const answer = typeof message.content === 'string' ? message.content : '';
     if (answer.trim()) {
+      const inferredUi = inferUiBlocksFromContext({
+        message: input.message,
+        answer,
+        financeOverview: lastFinanceOverview,
+      });
       return finalizeAgentOutput({
         answer,
         usedTools: Array.from(usedTools),
         availableRoutes: input.availableRoutes,
         availableModals: input.availableModals,
-        ui: inferUiBlocksFromContext({
+        ui: inferredUi,
+        sections: inferSectionsFromContext({
           message: input.message,
-          answer,
-          financeOverview: lastFinanceOverview,
+          ui: inferredUi,
         }),
       });
     }
     break;
   }
 
+  const fallbackUi = inferUiBlocksFromContext({
+    message: input.message,
+    answer: '',
+    financeOverview: lastFinanceOverview,
+  });
   return finalizeAgentOutput({
     answer: '目前沒有可用回覆，請再試一次。',
     usedTools: Array.from(usedTools),
     availableRoutes: input.availableRoutes,
     availableModals: input.availableModals,
-    ui: inferUiBlocksFromContext({
+    ui: fallbackUi,
+    sections: inferSectionsFromContext({
       message: input.message,
-      answer: '',
-      financeOverview: lastFinanceOverview,
+      ui: fallbackUi,
     }),
   });
 }
@@ -495,15 +565,20 @@ export async function* streamOpenAIAgent(
     }
 
     if (assistantContent.trim()) {
+      const inferredUi = inferUiBlocksFromContext({
+        message: input.message,
+        answer: assistantContent,
+        financeOverview: lastFinanceOverview,
+      });
       const output = finalizeAgentOutput({
         answer: assistantContent,
         usedTools: Array.from(usedTools),
         availableRoutes: input.availableRoutes,
         availableModals: input.availableModals,
-        ui: inferUiBlocksFromContext({
+        ui: inferredUi,
+        sections: inferSectionsFromContext({
           message: input.message,
-          answer: assistantContent,
-          financeOverview: lastFinanceOverview,
+          ui: inferredUi,
         }),
       });
       yield {
@@ -515,15 +590,20 @@ export async function* streamOpenAIAgent(
     break;
   }
 
+  const fallbackUi = inferUiBlocksFromContext({
+    message: input.message,
+    answer: '',
+    financeOverview: lastFinanceOverview,
+  });
   const fallbackOutput = finalizeAgentOutput({
     answer: '目前沒有可用回覆，請再試一次。',
     usedTools: Array.from(usedTools),
     availableRoutes: input.availableRoutes,
     availableModals: input.availableModals,
-    ui: inferUiBlocksFromContext({
+    ui: fallbackUi,
+    sections: inferSectionsFromContext({
       message: input.message,
-      answer: '',
-      financeOverview: lastFinanceOverview,
+      ui: fallbackUi,
     }),
   });
   yield {

@@ -53,6 +53,16 @@ export type AgentUiBlockContract =
   | AgentUiAssetDonutContract
   | AgentUiFinanceTrendLineContract;
 
+export type AgentSectionSlotContract = 'after-b';
+
+export type AgentSectionContract = {
+  id: string;
+  slot: AgentSectionSlotContract;
+  mode?: 'ephemeral';
+  title?: string;
+  blocks: AgentUiBlockContract[];
+};
+
 export type AgentInputContract = {
   message: string;
   history?: AgentHistoryMessageContract[];
@@ -67,6 +77,7 @@ export type AgentOutputContract = {
   usedTools?: string[];
   actions?: AgentActionContract[];
   ui?: AgentUiBlockContract[];
+  sections?: AgentSectionContract[];
   navigateTo?: string;
   openModalId?: string;
 };
