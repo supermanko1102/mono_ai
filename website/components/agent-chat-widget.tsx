@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { MessageCircle, Send, X } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
@@ -31,9 +31,12 @@ import { AgentUiBlockRenderer } from "@/components/agent-ui-block-renderer";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useAgentThreads } from "@/lib/hooks/use-agent-threads";
+import { useAutoScroll } from "@/lib/hooks/use-auto-scroll";
+import { useDebouncedEffect } from "@/lib/hooks/use-debounced-effect";
+import { useEscapeKey } from "@/lib/hooks/use-escape-key";
+import { useLatestRef } from "@/lib/hooks/use-latest-ref";
 
-const VISITOR_KEY = "website-v1-agent-visitor-id";
-const THREAD_KEY = "website-v1-agent-thread-id";
 const MODE_KEY = "website-v1-agent-mode";
 
 const MODE_LABELS: Record<AgentMode, string> = {
@@ -57,20 +60,6 @@ type ChatMessage = {
   ui?: AgentUiBlock;
 };
 
-type ThreadStatus = "active" | "archived";
-
-type ThreadSummary = {
-  id: string;
-  title: string;
-  status: ThreadStatus;
-  mode: AgentMode;
-  createdAt: string;
-  updatedAt: string;
-  archivedAt?: string;
-  messageCount: number;
-  lastMessagePreview?: string;
-};
-
 function makeId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -84,17 +73,6 @@ function createWelcomeMessage(): ChatMessage {
   };
 }
 
-function getOrCreateVisitorId() {
-  const existing = window.localStorage.getItem(VISITOR_KEY);
-  if (existing) {
-    return existing;
-  }
-
-  const created = `visitor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  window.localStorage.setItem(VISITOR_KEY, created);
-  return created;
-}
-
 function normalizeMode(value: string | null | undefined): AgentMode {
   if (!value) {
     return "default";
@@ -103,56 +81,6 @@ function normalizeMode(value: string | null | undefined): AgentMode {
   return AGENT_MODES.includes(candidate as AgentMode)
     ? (candidate as AgentMode)
     : "default";
-}
-
-function normalizeThreadStatus(value: unknown): ThreadStatus {
-  return value === "archived" ? "archived" : "active";
-}
-
-function normalizeThread(value: unknown): ThreadSummary | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const row = value as Record<string, unknown>;
-  const id = typeof row.id === "string" ? row.id.trim() : "";
-  if (!id) {
-    return null;
-  }
-  const titleRaw = typeof row.title === "string" ? row.title.trim() : "";
-  return {
-    id,
-    title: titleRaw || "新對話",
-    status: normalizeThreadStatus(row.status),
-    mode: normalizeMode(typeof row.mode === "string" ? row.mode : null),
-    createdAt: typeof row.createdAt === "string" ? row.createdAt : "",
-    updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : "",
-    archivedAt: typeof row.archivedAt === "string" ? row.archivedAt : undefined,
-    messageCount:
-      typeof row.messageCount === "number" && Number.isFinite(row.messageCount)
-        ? Math.max(0, Math.trunc(row.messageCount))
-        : 0,
-    lastMessagePreview:
-      typeof row.lastMessagePreview === "string" ? row.lastMessagePreview : undefined,
-  };
-}
-
-function sortThreads(threads: ThreadSummary[]): ThreadSummary[] {
-  return [...threads].sort((left, right) => {
-    if (left.updatedAt === right.updatedAt) {
-      return right.id.localeCompare(left.id);
-    }
-    return right.updatedAt.localeCompare(left.updatedAt);
-  });
-}
-
-function upsertThread(list: ThreadSummary[], thread: ThreadSummary): ThreadSummary[] {
-  const index = list.findIndex((item) => item.id === thread.id);
-  if (index === -1) {
-    return sortThreads([thread, ...list]);
-  }
-  const next = [...list];
-  next[index] = thread;
-  return sortThreads(next);
 }
 
 function parseSlashCommand(text: string): AgentCommand | null {
@@ -324,45 +252,22 @@ export function AgentChatWidget() {
   const pathname = usePathname();
   const currentPath = normalizePath(pathname ?? "/");
 
-  const [visitorId, setVisitorId] = useState("");
-  const [threadId, setThreadId] = useState("");
-  const [threads, setThreads] = useState<ThreadSummary[]>([]);
-  const [includeArchived, setIncludeArchived] = useState(false);
-
   const [open, setOpen] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<AgentMode>("default");
   const [openModalId, setOpenModalId] = useState<string | null>(null);
   const [persistedSections, setPersistedSections] = useState<AgentSection[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([createWelcomeMessage()]);
 
-  const messagesRef = useRef(messages);
-  const modeRef = useRef(mode);
-  const sectionsRef = useRef(persistedSections);
+  const messagesRef = useLatestRef(messages);
+  const modeRef = useLatestRef(mode);
+  const sectionsRef = useLatestRef(persistedSections);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
   const activeModal = getModalById(openModalId);
   const routeOptions = useMemo(() => [...AGENT_ROUTES], []);
   const modalOptions = useMemo(() => [...AGENT_MODAL_IDS], []);
-
-  const activeThread = useMemo(
-    () => threads.find((thread) => thread.id === threadId) ?? null,
-    [threads, threadId]
-  );
-
-  const visibleThreads = useMemo(() => {
-    const base = includeArchived
-      ? threads
-      : threads.filter((thread) => thread.status === "active");
-    if (activeThread && !base.some((thread) => thread.id === activeThread.id)) {
-      return [activeThread, ...base];
-    }
-    return base;
-  }, [threads, includeArchived, activeThread]);
-
-  const threadLocked = activeThread?.status === "archived";
 
   const modeQuery = useMemo(() => parseModeQuery(input), [input]);
   const modeOptions = useMemo(() => {
@@ -371,6 +276,60 @@ export function AgentChatWidget() {
     }
     return AGENT_MODES.filter((candidate) => candidate.includes(modeQuery));
   }, [modeQuery]);
+
+  const setModeAndPersist = useCallback((nextMode: AgentMode) => {
+    setMode(nextMode);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(MODE_KEY, nextMode);
+    }
+  }, []);
+
+  useEffect(() => {
+    const storedMode = normalizeMode(window.localStorage.getItem(MODE_KEY));
+    setModeAndPersist(storedMode);
+  }, [setModeAndPersist]);
+
+  const onThreadStateLoaded = useCallback(
+    (state: { mode?: string; messages?: unknown; sections?: unknown } | null) => {
+      const nextMode = normalizeMode(state?.mode);
+      const nextMessages = normalizePersistedMessages(state?.messages);
+      const nextSections = normalizePersistedSections(state?.sections);
+
+      setPersistedSections((prev) => {
+        for (const section of prev) {
+          emitAgentSectionRemove(section.id);
+        }
+        return nextSections;
+      });
+
+      for (const section of nextSections) {
+        emitAgentSectionCreate(section);
+      }
+
+      setModeAndPersist(nextMode);
+      setMessages(nextMessages.length > 0 ? nextMessages : [createWelcomeMessage()]);
+    },
+    [setModeAndPersist]
+  );
+
+  const {
+    visitorId,
+    threadId,
+    includeArchived,
+    hydrated,
+    activeThread,
+    visibleThreads,
+    threadLocked,
+    setIncludeArchived,
+    setThreadIdAndPersist,
+    createThreadAndSwitch,
+    toggleArchiveThread,
+    updateActiveThread,
+  } = useAgentThreads({
+    modeRef,
+    onThreadStateLoaded,
+  });
+
   const showModePicker =
     modeQuery !== null &&
     !loading &&
@@ -379,201 +338,22 @@ export function AgentChatWidget() {
     hydrated &&
     !threadLocked;
 
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
+  useEscapeKey({
+    enabled: !!activeModal,
+    onEscape: () => setOpenModalId(null),
+  });
 
-  useEffect(() => {
-    modeRef.current = mode;
-  }, [mode]);
+  useAutoScroll(messagesContainerRef, {
+    enabled: open,
+    deps: [messages, loading],
+  });
 
-  useEffect(() => {
-    sectionsRef.current = persistedSections;
-  }, [persistedSections]);
-
-  useEffect(() => {
-    setVisitorId(getOrCreateVisitorId());
-    setMode(normalizeMode(window.localStorage.getItem(MODE_KEY)));
-  }, []);
-
-  useEffect(() => {
-    if (!visitorId) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const bootstrap = async () => {
-      const response = await fetch(
-        `/api/agent/chat/threads?visitorId=${encodeURIComponent(
-          visitorId
-        )}&status=all&limit=100`,
-        {
-          cache: "no-store",
-        }
-      );
-
-      let fetchedThreads: ThreadSummary[] = [];
-      if (response.ok) {
-        const payload = (await response.json()) as { threads?: unknown[] };
-        fetchedThreads = Array.isArray(payload.threads)
-          ? payload.threads
-              .map((item) => normalizeThread(item))
-              .filter((item): item is ThreadSummary => item !== null)
-          : [];
-      }
-
-      if (fetchedThreads.length === 0) {
-        const createdResponse = await fetch("/api/agent/chat/threads", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            visitorId,
-            mode: modeRef.current,
-          }),
-        });
-        if (createdResponse.ok) {
-          const payload = (await createdResponse.json()) as { thread?: unknown };
-          const created = normalizeThread(payload.thread);
-          if (created) {
-            fetchedThreads = [created];
-          }
-        }
-      }
-
-      if (cancelled) {
+  useDebouncedEffect(
+    () => {
+      if (!visitorId || !threadId || !hydrated || loading) {
         return;
       }
 
-      const sorted = sortThreads(fetchedThreads);
-      setThreads(sorted);
-
-      const storedThreadId = window.localStorage.getItem(THREAD_KEY) ?? "";
-      const storedExists = sorted.some((thread) => thread.id === storedThreadId);
-      const defaultThread =
-        sorted.find((thread) => thread.status === "active") ?? sorted[0] ?? null;
-      const nextThreadId = storedExists ? storedThreadId : defaultThread?.id ?? "";
-
-      if (nextThreadId) {
-        setThreadId(nextThreadId);
-        window.localStorage.setItem(THREAD_KEY, nextThreadId);
-      }
-    };
-
-    void bootstrap();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [visitorId]);
-
-  useEffect(() => {
-    if (!visitorId || !threadId) {
-      return;
-    }
-
-    let cancelled = false;
-    setHydrated(false);
-
-    const loadThreadState = async () => {
-      try {
-        const response = await fetch(
-          `/api/agent/chat/threads/${encodeURIComponent(
-            threadId
-          )}/state?visitorId=${encodeURIComponent(visitorId)}`,
-          {
-            cache: "no-store",
-          }
-        );
-
-        if (!response.ok) {
-          return;
-        }
-
-        const payload = (await response.json()) as {
-          state?: {
-            mode?: string;
-            messages?: unknown;
-            sections?: unknown;
-          } | null;
-        };
-
-        if (cancelled || !payload.state) {
-          return;
-        }
-
-        const nextMode = normalizeMode(payload.state.mode);
-        const nextMessages = normalizePersistedMessages(payload.state.messages);
-        const nextSections = normalizePersistedSections(payload.state.sections);
-
-        setPersistedSections((prev) => {
-          for (const section of prev) {
-            emitAgentSectionRemove(section.id);
-          }
-          return nextSections;
-        });
-
-        for (const section of nextSections) {
-          emitAgentSectionCreate(section);
-        }
-
-        setMode(nextMode);
-        setMessages(nextMessages.length > 0 ? nextMessages : [createWelcomeMessage()]);
-      } catch {
-        // Ignore load errors to keep chat usable.
-      } finally {
-        if (!cancelled) {
-          setHydrated(true);
-        }
-      }
-    };
-
-    void loadThreadState();
-    window.localStorage.setItem(THREAD_KEY, threadId);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [visitorId, threadId]);
-
-  useEffect(() => {
-    if (!activeModal) {
-      return undefined;
-    }
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpenModalId(null);
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeModal]);
-
-  useEffect(() => {
-    window.localStorage.setItem(MODE_KEY, mode);
-  }, [mode]);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const container = messagesContainerRef.current;
-    if (!container) {
-      return;
-    }
-    container.scrollTop = container.scrollHeight;
-  }, [messages, loading, open]);
-
-  useEffect(() => {
-    if (!visitorId || !threadId || !hydrated || loading) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
       const title = deriveThreadTitle(messagesRef.current);
 
       void fetch(
@@ -592,32 +372,36 @@ export function AgentChatWidget() {
           }),
         }
       ).then(() => {
-        setThreads((prev) => {
-          const current = prev.find((item) => item.id === threadId);
-          if (!current) {
-            return prev;
-          }
-          return upsertThread(prev, {
+        updateActiveThread((current) => {
+          const lastMessage = messagesRef.current
+            .slice()
+            .reverse()
+            .find((msg) => !msg.ui && msg.content.trim());
+          return {
             ...current,
             mode: modeRef.current,
             title: title || current.title,
             updatedAt: new Date().toISOString(),
             messageCount: messagesRef.current.filter((msg) => !msg.ui).length,
-            lastMessagePreview:
-              messagesRef.current
-                .slice()
-                .reverse()
-                .find((msg) => !msg.ui && msg.content.trim())
-                ?.content.slice(0, 80) ?? current.lastMessagePreview,
-          });
+            lastMessagePreview: lastMessage
+              ? lastMessage.content.slice(0, 80)
+              : current.lastMessagePreview,
+          };
         });
       });
-    }, 200);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [visitorId, threadId, hydrated, loading, messages, mode, persistedSections]);
+    },
+    200,
+    [
+      visitorId,
+      threadId,
+      hydrated,
+      loading,
+      messages,
+      mode,
+      persistedSections,
+      updateActiveThread,
+    ]
+  );
 
   function appendSystemMessages(lines: string[]) {
     if (lines.length === 0) {
@@ -658,82 +442,6 @@ export function AgentChatWidget() {
     appendSystemMessages(notices);
   }
 
-  async function createThreadAndSwitch() {
-    if (!visitorId) {
-      return;
-    }
-
-    const response = await fetch("/api/agent/chat/threads", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        visitorId,
-        mode,
-      }),
-    });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = (await response.json()) as { thread?: unknown };
-    const created = normalizeThread(payload.thread);
-    if (!created) {
-      return;
-    }
-
-    setThreads((prev) => upsertThread(prev, created));
-    setThreadId(created.id);
-    window.localStorage.setItem(THREAD_KEY, created.id);
-  }
-
-  async function toggleArchiveThread() {
-    if (!visitorId || !activeThread) {
-      return;
-    }
-
-    const targetArchived = activeThread.status !== "archived";
-    const response = await fetch(
-      `/api/agent/chat/threads/${encodeURIComponent(activeThread.id)}/archive`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          visitorId,
-          archived: targetArchived,
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = (await response.json()) as { thread?: unknown };
-    const updated = normalizeThread(payload.thread);
-    if (!updated) {
-      return;
-    }
-
-    setThreads((prev) => upsertThread(prev, updated));
-
-    if (targetArchived) {
-      const fallback = threads.find(
-        (thread) => thread.id !== activeThread.id && thread.status === "active"
-      );
-      if (fallback) {
-        setThreadId(fallback.id);
-        window.localStorage.setItem(THREAD_KEY, fallback.id);
-      } else {
-        await createThreadAndSwitch();
-      }
-    }
-  }
-
   async function sendMessage(rawText: string) {
     const text = rawText.trim();
     if (
@@ -751,7 +459,7 @@ export function AgentChatWidget() {
     const optimisticMode = extractModeFromCommand(command);
     const requestMode = optimisticMode ?? mode;
     if (optimisticMode) {
-      setMode(optimisticMode);
+      setModeAndPersist(optimisticMode);
     }
 
     const history = toAgentHistory(messagesRef.current);
@@ -837,7 +545,7 @@ export function AgentChatWidget() {
         if (event.type === "done") {
           pendingActions = mergeActions(event.response);
           const responseMode = normalizeMode(event.response.mode);
-          setMode(responseMode);
+          setModeAndPersist(responseMode);
           if (Array.isArray(event.response.sections)) {
             for (const section of event.response.sections) {
               if (isAgentSection(section)) {
@@ -863,16 +571,12 @@ export function AgentChatWidget() {
       runActions(pendingActions);
       appendSystemMessages(sectionNotices);
 
-      setThreads((prev) => {
-        const current = prev.find((thread) => thread.id === threadId);
-        if (!current) {
-          return prev;
-        }
-        return upsertThread(prev, {
+      updateActiveThread((current) => {
+        return {
           ...current,
           updatedAt: new Date().toISOString(),
-          mode,
-        });
+          mode: modeRef.current,
+        };
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -935,7 +639,7 @@ export function AgentChatWidget() {
               <div className="flex items-center gap-2">
                 <select
                   value={threadId}
-                  onChange={(event) => setThreadId(event.target.value)}
+                  onChange={(event) => setThreadIdAndPersist(event.target.value)}
                   className="h-8 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
                   disabled={!hydrated && !!threadId}
                 >
