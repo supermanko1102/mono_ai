@@ -310,7 +310,8 @@ export async function runOpenAIAgent(input: AgentInput): Promise<AgentOutput> {
   const model = process.env.OPENAI_MODEL ?? 'gpt-4.1-mini';
   const systemPrompt = createSystemPrompt(
     input.availableRoutes,
-    input.availableModals
+    input.availableModals,
+    input.mode
   );
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -456,7 +457,8 @@ export async function* streamOpenAIAgent(
   const model = process.env.OPENAI_MODEL ?? 'gpt-4.1-mini';
   const systemPrompt = createSystemPrompt(
     input.availableRoutes,
-    input.availableModals
+    input.availableModals,
+    input.mode
   );
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [

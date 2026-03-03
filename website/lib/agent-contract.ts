@@ -1,3 +1,14 @@
+export const AGENT_MODES = ["default", "sales", "tutor", "support"] as const;
+export const AGENT_COMMAND_NAMES = ["mode", "summarize"] as const;
+
+export type AgentMode = (typeof AGENT_MODES)[number];
+export type AgentCommandName = (typeof AGENT_COMMAND_NAMES)[number];
+
+export type AgentCommand = {
+  name: AgentCommandName;
+  args?: string[];
+};
+
 export type AgentAction =
   | {
       type: "navigate";
@@ -50,6 +61,12 @@ export type AgentChatResponse = {
   sections?: AgentSection[];
   navigateTo?: string;
   openModalId?: string;
+  mode?: AgentMode;
+  commandResult?: {
+    name: AgentCommandName;
+    ok: boolean;
+  };
+  memoryHints?: string[];
   historyCount?: number;
   error?: string;
 };

@@ -1,7 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
-
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
+import { getDb } from "@/lib/server/db";
 
 export type FinanceKind = "asset" | "liability";
 
@@ -38,36 +36,24 @@ type GroupedRow = {
 const ASSET_TONES = ["blue", "light-blue", "pale-blue", "sky"] as const;
 const LIABILITY_TONES = ["red", "pink", "orange", "yellow"] as const;
 
-const DB_PATH =
-  process.env.WEBSITE_DB_PATH?.trim() ||
-  path.join(process.cwd(), "data", "website.db");
+let financeSchemaReady = false;
 
-declare global {
-  var __websiteDb: Database.Database | undefined;
-}
-
-function getDb() {
-  if (!globalThis.__websiteDb) {
-    const dir = path.dirname(DB_PATH);
-    fs.mkdirSync(dir, { recursive: true });
-
-    const db = new Database(DB_PATH);
-    db.pragma("journal_mode = WAL");
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS finance_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        kind TEXT NOT NULL CHECK (kind IN ('asset', 'liability')),
-        category TEXT NOT NULL,
-        amount REAL NOT NULL CHECK (amount >= 0),
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    seedIfEmpty(db);
-    globalThis.__websiteDb = db;
+function ensureFinanceSchema() {
+  if (financeSchemaReady) {
+    return;
   }
-
-  return globalThis.__websiteDb;
+  const db = getDb();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS finance_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL CHECK (kind IN ('asset', 'liability')),
+      category TEXT NOT NULL,
+      amount REAL NOT NULL CHECK (amount >= 0),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  seedIfEmpty(db);
+  financeSchemaReady = true;
 }
 
 function seedIfEmpty(db: Database.Database) {
@@ -115,6 +101,7 @@ export function formatAud(amount: number, options?: { negativeStyle?: boolean })
 }
 
 function sumByKind(kind: FinanceKind): number {
+  ensureFinanceSchema();
   const row = getDb()
     .prepare(
       "SELECT COALESCE(SUM(amount), 0) AS total FROM finance_items WHERE kind = ?"
@@ -124,6 +111,7 @@ function sumByKind(kind: FinanceKind): number {
 }
 
 function getGroupedByKind(kind: FinanceKind): GroupedRow[] {
+  ensureFinanceSchema();
   return getDb()
     .prepare(
       `SELECT category, COALESCE(SUM(amount), 0) AS total
@@ -175,6 +163,7 @@ export function getDashboardData(): DashboardData {
 }
 
 export function listFinanceItems(limit = 100): FinanceItem[] {
+  ensureFinanceSchema();
   return getDb()
     .prepare(
       `SELECT id, kind, category, amount, created_at as createdAt
@@ -190,6 +179,7 @@ export function createFinanceItem(input: {
   category: string;
   amount: number;
 }): FinanceItem {
+  ensureFinanceSchema();
   const category = input.category.trim();
   if (!category) {
     throw new Error("category is required");

@@ -147,7 +147,8 @@ export async function runGeminiAgent(input: AgentInput): Promise<AgentOutput> {
   ensureGeminiApiKey();
   const systemPrompt = createSystemPrompt(
     input.availableRoutes,
-    input.availableModals
+    input.availableModals,
+    input.mode
   );
 
   const { output, text } = await ai.generate({

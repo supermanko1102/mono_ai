@@ -7,6 +7,7 @@ import type {
 } from '../shared/agent-contract.js';
 
 import {
+  AGENT_MODES,
   DEFAULT_AVAILABLE_MODALS,
   DEFAULT_AVAILABLE_ROUTES,
 } from '../shared/agent-contract.js';
@@ -69,6 +70,7 @@ export const AgentInputSchema = z.object({
   locale: z.string().default(DEFAULT_LOCALE),
   availableRoutes: z.array(z.string()).default(DEFAULT_AVAILABLE_ROUTES),
   availableModals: z.array(z.string()).default(DEFAULT_AVAILABLE_MODALS),
+  mode: z.enum(AGENT_MODES).default('default'),
 });
 
 export const AgentOutputSchema = z.object({

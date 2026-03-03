@@ -7,6 +7,12 @@
 - `navigate` action：導頁到 `/, /pricing, /docs, /support`
 - `open_modal` action：開啟指定 modal
 - 透過 Next API route proxy 到 AI server（`/api/agent/chat/stream`）
+- chat 對話串與封存（SQLite）：
+  - `GET /api/agent/chat/threads?visitorId=...&status=active|archived|all`
+  - `POST /api/agent/chat/threads`
+  - `GET /api/agent/chat/threads/:threadId/state?visitorId=...`
+  - `PUT /api/agent/chat/threads/:threadId/state`
+  - `PATCH /api/agent/chat/threads/:threadId/archive`
 - 本機資料 API（SQLite）：
   - `GET /api/data/summary`
   - `GET /api/data/items`

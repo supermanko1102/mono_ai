@@ -4,12 +4,21 @@ export const DEFAULT_AVAILABLE_MODALS = [
   'docs-quickstart',
   'support-contact',
 ];
+export const AGENT_MODES = ['default', 'sales', 'tutor', 'support'] as const;
+export const AGENT_COMMAND_NAMES = ['mode', 'summarize'] as const;
 
 export type AgentHistoryRole = 'user' | 'model';
+export type AgentModeContract = (typeof AGENT_MODES)[number];
+export type AgentCommandNameContract = (typeof AGENT_COMMAND_NAMES)[number];
 
 export type AgentHistoryMessageContract = {
   role: AgentHistoryRole;
   content: string;
+};
+
+export type AgentCommandContract = {
+  name: AgentCommandNameContract;
+  args?: string[];
 };
 
 export type AgentActionNavigateContract = {
@@ -70,6 +79,8 @@ export type AgentInputContract = {
   locale?: string;
   availableRoutes?: string[];
   availableModals?: string[];
+  mode?: AgentModeContract;
+  command?: AgentCommandContract;
 };
 
 export type AgentOutputContract = {
@@ -80,6 +91,12 @@ export type AgentOutputContract = {
   sections?: AgentSectionContract[];
   navigateTo?: string;
   openModalId?: string;
+  mode?: AgentModeContract;
+  commandResult?: {
+    name: AgentCommandNameContract;
+    ok: boolean;
+  };
+  memoryHints?: string[];
 };
 
 export type AgentChatRequestContract = AgentInputContract & {

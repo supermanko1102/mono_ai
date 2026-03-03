@@ -1,6 +1,8 @@
 import {
+  AGENT_MODES,
   DEFAULT_AVAILABLE_MODALS,
   DEFAULT_AVAILABLE_ROUTES,
+  type AgentModeContract,
 } from '../shared/agent-contract.js';
 import type {
   AgentAction,
@@ -310,10 +312,20 @@ export function finalizeAgentOutput({
 
 export function createSystemPrompt(
   availableRoutes: string[],
-  availableModals: string[]
+  availableModals: string[],
+  mode: AgentModeContract = 'default'
 ): string {
   const routes = normalizeAvailableRoutes(availableRoutes).join(', ');
   const modals = normalizeAvailableModals(availableModals).join(', ');
+  const normalizedMode = AGENT_MODES.includes(mode) ? mode : 'default';
+  const modePrompt =
+    normalizedMode === 'sales'
+      ? 'Mode: sales. Focus on value proposition, ROI, and concise conversion-oriented recommendations.'
+      : normalizedMode === 'tutor'
+        ? 'Mode: tutor. Explain clearly with structure, examples, and learning-oriented guidance.'
+        : normalizedMode === 'support'
+          ? 'Mode: support. Be calm, diagnostic, and step-by-step with clear troubleshooting actions.'
+          : 'Mode: default. Keep responses practical and direct.';
   return [
     'You are a practical AI agent for developers.',
     'Answer in Traditional Chinese unless user asks otherwise.',
@@ -331,5 +343,6 @@ export function createSystemPrompt(
     'When user asks to open a modal/dialog/popup, append one tag like <<OPEN_MODAL:modal-id>>.',
     'Only use allowed routes.',
     'Only use allowed modal ids.',
+    modePrompt,
   ].join(' ');
 }
