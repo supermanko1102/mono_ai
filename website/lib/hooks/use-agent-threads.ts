@@ -104,10 +104,11 @@ function upsertThread(
 }
 
 export function useAgentThreads(options: {
+  enabled: boolean;
   modeRef: MutableRefObject<AgentMode>;
   onThreadStateLoaded: (state: LoadedThreadState) => void;
 }) {
-  const { modeRef, onThreadStateLoaded } = options;
+  const { enabled, modeRef, onThreadStateLoaded } = options;
   const onThreadStateLoadedRef = useLatestRef(onThreadStateLoaded);
 
   const [visitorId, setVisitorId] = useState("");
@@ -234,11 +235,18 @@ export function useAgentThreads(options: {
   ]);
 
   useEffect(() => {
+    if (!enabled) {
+      setVisitorId("");
+      setThreadId("");
+      setThreads([]);
+      setHydrated(false);
+      return;
+    }
     setVisitorId(getOrCreateVisitorId());
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
-    if (!visitorId) {
+    if (!enabled || !visitorId) {
       return;
     }
 
@@ -309,10 +317,10 @@ export function useAgentThreads(options: {
     return () => {
       cancelled = true;
     };
-  }, [modeRef, setThreadIdAndPersist, visitorId]);
+  }, [enabled, modeRef, setThreadIdAndPersist, visitorId]);
 
   useEffect(() => {
-    if (!visitorId || !threadId) {
+    if (!enabled || !visitorId || !threadId) {
       return;
     }
 
@@ -355,7 +363,7 @@ export function useAgentThreads(options: {
     return () => {
       cancelled = true;
     };
-  }, [onThreadStateLoadedRef, threadId, visitorId]);
+  }, [enabled, onThreadStateLoadedRef, threadId, visitorId]);
 
   return {
     visitorId,

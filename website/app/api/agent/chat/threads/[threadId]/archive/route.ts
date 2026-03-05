@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getAuthenticatedVisitorId } from "@/lib/server/agent-auth";
 import { setChatThreadArchived } from "@/lib/server/chat-thread-store";
 
 export const runtime = "nodejs";
@@ -8,17 +9,14 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ threadId: string }> }
 ) {
+  const visitorId = await getAuthenticatedVisitorId();
+  if (!visitorId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const { threadId } = await params;
     const body = await request.json();
-    const visitorId =
-      typeof body?.visitorId === "string" ? body.visitorId.trim() : "";
-    if (!visitorId) {
-      return NextResponse.json(
-        { error: "visitorId is required" },
-        { status: 400 }
-      );
-    }
 
     const archived = body?.archived !== false;
     const thread = setChatThreadArchived({

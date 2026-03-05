@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { MessageCircle, Send, X } from "lucide-react";
+import { Lock, MessageCircle, Send, X } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
+import { signIn, useSession } from "next-auth/react";
 
 import {
   AGENT_MODES,
@@ -251,6 +252,9 @@ export function AgentChatWidget() {
   const router = useRouter();
   const pathname = usePathname();
   const currentPath = normalizePath(pathname ?? "/");
+  const { status: authStatus } = useSession();
+  const isAuthenticated = authStatus === "authenticated";
+  const authLoading = authStatus === "loading";
 
   const [open, setOpen] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -326,11 +330,13 @@ export function AgentChatWidget() {
     toggleArchiveThread,
     updateActiveThread,
   } = useAgentThreads({
+    enabled: isAuthenticated,
     modeRef,
     onThreadStateLoaded,
   });
 
   const showModePicker =
+    isAuthenticated &&
     modeQuery !== null &&
     !loading &&
     !!threadId &&
@@ -446,6 +452,7 @@ export function AgentChatWidget() {
     const text = rawText.trim();
     if (
       !text ||
+      !isAuthenticated ||
       loading ||
       !threadId ||
       !visitorId ||
@@ -636,87 +643,126 @@ export function AgentChatWidget() {
                 </Button>
               </div>
 
-              <div className="flex items-center gap-2">
-                <select
-                  value={threadId}
-                  onChange={(event) => setThreadIdAndPersist(event.target.value)}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
-                  disabled={!hydrated && !!threadId}
-                >
-                  {visibleThreads.map((thread) => (
-                    <option key={thread.id} value={thread.id}>
-                      {thread.status === "archived" ? "[封存] " : ""}
-                      {thread.title}
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 px-2 text-xs"
-                  onClick={() => {
-                    void createThreadAndSwitch();
-                  }}
-                  disabled={!visitorId || loading}
-                >
-                  新對話
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 px-2 text-xs"
-                  onClick={() => {
-                    void toggleArchiveThread();
-                  }}
-                  disabled={!activeThread || loading}
-                >
-                  {threadLocked ? "取消封存" : "封存"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-2 text-xs"
-                  onClick={() => setIncludeArchived((prev) => !prev)}
-                >
-                  {includeArchived ? "隱藏封存" : "顯示封存"}
-                </Button>
-              </div>
+              {authLoading ? (
+                <p className="text-xs text-slate-500">正在確認登入狀態...</p>
+              ) : isAuthenticated ? (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={threadId}
+                    onChange={(event) => setThreadIdAndPersist(event.target.value)}
+                    className="h-8 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700"
+                    disabled={!hydrated && !!threadId}
+                  >
+                    {visibleThreads.map((thread) => (
+                      <option key={thread.id} value={thread.id}>
+                        {thread.status === "archived" ? "[封存] " : ""}
+                        {thread.title}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2 text-xs"
+                    onClick={() => {
+                      void createThreadAndSwitch();
+                    }}
+                    disabled={!visitorId || loading}
+                  >
+                    新對話
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2 text-xs"
+                    onClick={() => {
+                      void toggleArchiveThread();
+                    }}
+                    disabled={!activeThread || loading}
+                  >
+                    {threadLocked ? "取消封存" : "封存"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-xs"
+                    onClick={() => setIncludeArchived((prev) => !prev)}
+                  >
+                    {includeArchived ? "隱藏封存" : "顯示封存"}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
+                  <p className="text-xs text-slate-600">
+                    使用 Agent 對話前，請先登入 Google。
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-7 bg-slate-900 px-2 text-xs hover:bg-slate-800"
+                    onClick={() => signIn("google")}
+                  >
+                    立即登入
+                  </Button>
+                </div>
+              )}
             </div>
 
             <div
               ref={messagesContainerRef}
               className="max-h-[460px] min-h-[340px] space-y-2 overflow-auto bg-slate-50 p-3"
             >
-              {threadLocked ? (
-                <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
-                  這個對話串已封存。可按「取消封存」後繼續對話。
-                </p>
-              ) : null}
+              {!isAuthenticated ? (
+                <div className="grid min-h-[300px] place-items-center rounded-md border border-slate-200 bg-white">
+                  <div className="space-y-2 px-4 text-center">
+                    <Lock className="mx-auto size-5 text-slate-500" />
+                    <p className="text-sm font-medium text-slate-700">需要登入才能聊天</p>
+                    <p className="text-xs text-slate-500">
+                      登入後才能建立或讀取對話串，並開始使用 Agent。
+                    </p>
+                    <Button
+                      type="button"
+                      className="h-8 bg-slate-900 px-3 text-xs hover:bg-slate-800"
+                      onClick={() => signIn("google")}
+                    >
+                      使用 Google 登入
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {threadLocked ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+                      這個對話串已封存。可按「取消封存」後繼續對話。
+                    </p>
+                  ) : null}
 
-              {messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`rounded-md px-2 py-1.5 text-sm ${
-                    message.role === "assistant"
-                      ? "border border-slate-200 bg-white text-slate-700"
-                      : message.role === "user"
-                        ? "bg-slate-900 text-white"
-                        : "bg-amber-50 text-amber-900"
-                  }`}
-                >
-                  {message.ui ? (
-                    <AgentUiBlockRenderer block={message.ui} />
-                  ) : (
-                    <p>{message.content || "..."}</p>
-                  )}
-                </article>
-              ))}
-              {loading ? (
-                <p className="text-xs text-slate-500">Agent thinking...</p>
-              ) : null}
+                  {messages.map((message) => (
+                    <article
+                      key={message.id}
+                      className={`rounded-md px-2 py-1.5 text-sm ${
+                        message.role === "assistant"
+                          ? "border border-slate-200 bg-white text-slate-700"
+                          : message.role === "user"
+                            ? "bg-slate-900 text-white"
+                            : "bg-amber-50 text-amber-900"
+                      }`}
+                    >
+                      {message.ui ? (
+                        <AgentUiBlockRenderer block={message.ui} />
+                      ) : (
+                        <p>{message.content || "..."}</p>
+                      )}
+                    </article>
+                  ))}
+                  {loading ? (
+                    <p className="text-xs text-slate-500">Agent thinking...</p>
+                  ) : null}
+                </>
+              )}
             </div>
 
             <div className="relative border-t border-slate-200 bg-white p-2">
@@ -744,9 +790,18 @@ export function AgentChatWidget() {
                 <Input
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
-                  placeholder="例如：/mode tutor 或 帶我去 pricing"
+                  placeholder={
+                    isAuthenticated
+                      ? "例如：/mode tutor 或 帶我去 pricing"
+                      : "請先登入 Google 後再開始對話"
+                  }
                   disabled={
-                    loading || !threadId || !visitorId || !hydrated || threadLocked
+                    !isAuthenticated ||
+                    loading ||
+                    !threadId ||
+                    !visitorId ||
+                    !hydrated ||
+                    threadLocked
                   }
                   className="h-8 text-xs"
                 />
@@ -755,6 +810,7 @@ export function AgentChatWidget() {
                   size="icon"
                   className="size-8 bg-cyan-600 hover:bg-cyan-700"
                   disabled={
+                    !isAuthenticated ||
                     loading ||
                     !input.trim() ||
                     !threadId ||

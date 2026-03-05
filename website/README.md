@@ -8,11 +8,12 @@
 - `open_modal` action：開啟指定 modal
 - 透過 Next API route proxy 到 AI server（`/api/agent/chat/stream`）
 - chat 對話串與封存（SQLite）：
-  - `GET /api/agent/chat/threads?visitorId=...&status=active|archived|all`
+  - `GET /api/agent/chat/threads?status=active|archived|all`
   - `POST /api/agent/chat/threads`
-  - `GET /api/agent/chat/threads/:threadId/state?visitorId=...`
+  - `GET /api/agent/chat/threads/:threadId/state`
   - `PUT /api/agent/chat/threads/:threadId/state`
   - `PATCH /api/agent/chat/threads/:threadId/archive`
+- Agent chat 需先登入 Google（未登入時會阻擋 chat 與 API）
 - 本機資料 API（SQLite）：
   - `GET /api/data/summary`
   - `GET /api/data/items`
@@ -41,12 +42,26 @@ npm run dev
 
 - `AI_AGENT_BASE_URL`：AI server base URL（預設 `http://localhost:3010`）
 - `WEBSITE_DB_PATH`：SQLite 路徑（預設 `./data/website.db`）
+- `NEXTAUTH_SECRET`：NextAuth session 簽章密鑰（建議用 `openssl rand -base64 32` 產生）
+- `NEXTAUTH_URL`：網站網址（本機通常 `http://localhost:3000`）
+- `GOOGLE_CLIENT_ID`：Google OAuth Client ID
+- `GOOGLE_CLIENT_SECRET`：Google OAuth Client Secret
 
 可放在 `website/.env.local`：
 
 ```bash
 AI_AGENT_BASE_URL=http://localhost:3010
 WEBSITE_DB_PATH=./data/website.db
+NEXTAUTH_SECRET=replace-with-random-secret
+NEXTAUTH_URL=http://localhost:3000
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+```
+
+Google Cloud OAuth redirect URI 請加上：
+
+```bash
+http://localhost:3000/api/auth/callback/google
 ```
 
 ## 快速驗證真資料

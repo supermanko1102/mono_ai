@@ -8,6 +8,7 @@ import {
   saveChatThreadState,
   type PersistedChatMessage,
 } from "@/lib/server/chat-thread-store";
+import { getAuthenticatedVisitorId } from "@/lib/server/agent-auth";
 
 export const runtime = "nodejs";
 
@@ -62,18 +63,15 @@ function normalizeSections(value: unknown): AgentSection[] {
 }
 
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ threadId: string }> }
 ) {
-  const { threadId } = await params;
-  const { searchParams } = new URL(request.url);
-  const visitorId = searchParams.get("visitorId")?.trim() ?? "";
+  const visitorId = await getAuthenticatedVisitorId();
   if (!visitorId) {
-    return NextResponse.json(
-      { error: "visitorId is required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const { threadId } = await params;
 
   const state = loadChatThreadState({
     threadId,
@@ -86,17 +84,14 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ threadId: string }> }
 ) {
+  const visitorId = await getAuthenticatedVisitorId();
+  if (!visitorId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const { threadId } = await params;
     const body = await request.json();
-    const visitorId =
-      typeof body?.visitorId === "string" ? body.visitorId.trim() : "";
-    if (!visitorId) {
-      return NextResponse.json(
-        { error: "visitorId is required" },
-        { status: 400 }
-      );
-    }
 
     const state = saveChatThreadState({
       threadId,

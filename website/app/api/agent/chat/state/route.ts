@@ -8,6 +8,7 @@ import {
 import type { AgentMode, AgentSection } from "@/lib/agent-contract";
 import { AGENT_MODES } from "@/lib/agent-contract";
 import { isAgentSection, isAgentUiBlock } from "@/lib/agent-guards";
+import { getAuthenticatedVisitorId } from "@/lib/server/agent-auth";
 
 export const runtime = "nodejs";
 
@@ -62,6 +63,10 @@ function normalizeSections(value: unknown): AgentSection[] {
 }
 
 export async function GET(request: Request) {
+  if (!(await getAuthenticatedVisitorId())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const sessionId = searchParams.get("sessionId")?.trim() ?? "";
   if (!sessionId) {
@@ -76,6 +81,10 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
+  if (!(await getAuthenticatedVisitorId())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
     const sessionId =

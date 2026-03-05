@@ -18,6 +18,7 @@ import {
   type AllocationItem,
 } from "@/lib/server/finance-store";
 import { AddFinanceItemModal } from "@/components/add-finance-item-modal";
+import { AuthControls } from "@/components/auth-controls";
 import { RuntimeSectionHost } from "@/components/runtime-section-host";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -89,6 +90,7 @@ export default function Home() {
                 <Bell className="size-4 text-slate-700" />
               </Button>
               <AddFinanceItemModal />
+              <AuthControls />
             </div>
           </header>
 

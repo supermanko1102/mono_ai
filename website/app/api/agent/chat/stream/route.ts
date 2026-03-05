@@ -1,8 +1,16 @@
+import { NextResponse } from "next/server";
+
+import { getAuthenticatedVisitorId } from "@/lib/server/agent-auth";
+
 export const runtime = "nodejs";
 
 const DEFAULT_AI_BASE_URL = "http://localhost:3010";
 
 export async function POST(request: Request) {
+  if (!(await getAuthenticatedVisitorId())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const payload = await request.json();
     const aiBaseUrl = process.env.AI_AGENT_BASE_URL ?? DEFAULT_AI_BASE_URL;

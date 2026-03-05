@@ -7,6 +7,7 @@ import {
   listChatThreads,
   type ThreadStatus,
 } from "@/lib/server/chat-thread-store";
+import { getAuthenticatedVisitorId } from "@/lib/server/agent-auth";
 
 export const runtime = "nodejs";
 
@@ -29,15 +30,12 @@ function normalizeMode(value: unknown): AgentMode {
 }
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const visitorId = searchParams.get("visitorId")?.trim() ?? "";
+  const visitorId = await getAuthenticatedVisitorId();
   if (!visitorId) {
-    return NextResponse.json(
-      { error: "visitorId is required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const { searchParams } = new URL(request.url);
   const status = normalizeStatus(searchParams.get("status"));
   const limitParam = Number(searchParams.get("limit") ?? "40");
   const limit = Number.isFinite(limitParam)
@@ -53,16 +51,13 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const visitorId = await getAuthenticatedVisitorId();
+  if (!visitorId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
-    const visitorId =
-      typeof body?.visitorId === "string" ? body.visitorId.trim() : "";
-    if (!visitorId) {
-      return NextResponse.json(
-        { error: "visitorId is required" },
-        { status: 400 }
-      );
-    }
 
     const title = typeof body?.title === "string" ? body.title : undefined;
     const mode = normalizeMode(body?.mode);
